@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "unframed"
+dynamic = ["version"]
+description = 'An unframed AI-driven narrative game - AI builds the world, rules, characters and story from scratch.'
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = ["ai", "narrative", "game", "storytelling", "llm"]
+authors = [
+  { name = "zaf-x", email = "baoshuwen2013@outlook.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+  "openai>=1.0.0",
+]
+
+[project.scripts]
+unframed = "unframed.cli:main"
+
+[project.urls]
+Documentation = "https://github.com/zaf-x/unframed#readme"
+Issues = "https://github.com/zaf-x/unframed/issues"
+Source = "https://github.com/zaf-x/unframed"
+
+[tool.hatch.version]
+path = "src/unframed/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/unframed tests}"
+
+[tool.coverage.run]
+source_pkgs = ["unframed", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/unframed/__about__.py",
+]
+
+[tool.coverage.paths]
+unframed = ["src/unframed", "*/unframed/src/unframed"]
+tests = ["tests", "*/unframed/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
