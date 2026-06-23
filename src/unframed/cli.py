@@ -10,17 +10,128 @@ Run::
 Environment variables:
 
     OPENAI_API_KEY   API key (also accepted via --api-key)
+    OPENAI_BASE_URL  API base URL (also accepted via --base-url)
+    OPENAI_MODEL     Model name (default: gpt-4o)
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
+import itertools
 import json
 import os
 import sys
+import threading
+import time
 from typing import List, Optional
 
+# ---- Colorama: 跨平台 ANSI 支持 ----
+import colorama
+
+colorama.init()
+
+# ---- Readline: 命令行历史、行编辑 ----
+try:
+    import readline  # noqa: F401
+
+    histfile = os.path.expanduser("~/.unframed_history")
+    try:
+        readline.read_history_file(histfile)
+    except (FileNotFoundError, OSError):
+        pass
+
+    atexit.register(readline.write_history_file, histfile)
+except ImportError:
+    pass
+
+# ---- Rich: Markdown 渲染输出 ----
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.text import Text
+
 from .engine import GameEngine
+
+
+# ======================================================================
+# 常量
+# ======================================================================
+
+AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
+
+
+# ======================================================================
+# Spinner（后台转圈指示器）
+# ======================================================================
+
+
+class _Spinner:
+    """Simple spinner that runs in a background thread.
+
+    Message can be updated dynamically via :meth:`update` so the
+    displayed text reflects what the AI is currently doing.
+    Automatically clears when stopped.
+    """
+
+    _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self) -> None:
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._msg = "AI 正在调整世界"
+
+    def start(self, msg: str = "") -> None:
+        if msg:
+            self._msg = msg
+        self._running = True
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def update(self, msg: str) -> None:
+        """Update the displayed message (thread-safe)."""
+        self._msg = msg
+
+    def _spin(self) -> None:
+        for frame in itertools.cycle(self._FRAMES):
+            if not self._running:
+                break
+            sys.stdout.write(f"\r\033[2K\033[2m{frame} {self._msg}...\033[0m")
+            sys.stdout.flush()
+            time.sleep(0.1)
+        # Clear the line on stop
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.5)
+            self._thread = None
+
+
+# ======================================================================
+# Console
+# ======================================================================
+
+console = Console()
+
+
+# ======================================================================
+# 工具名称 → 显示文案映射
+# ======================================================================
+
+_TOOL_LABELS = {
+    "set_var": "修改世界状态",
+    "get_var": "读取变量",
+    "pin_var": "固定核心变量",
+    "unpin_var": "释放核心变量",
+    "mark_as_end_node": "准备结局",
+    "set_setting": "锁定游戏设定",
+    "set_root_plan_node": "规划剧情主线",
+    "append_plan_node": "规划剧情分支",
+    "advance_plot": "推进剧情",
+}
 
 
 # ======================================================================
@@ -39,72 +150,113 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--base-url",
-        help="Custom API base URL (for compatible providers)",
+        help="Custom API base URL (default: OPENAI_BASE_URL env)",
     )
     parser.add_argument(
         "--model",
-        default="gpt-4o",
-        help="Model name (default: gpt-4o)",
+        help="Model name (default: gpt-4o, overridable via OPENAI_MODEL env)",
+    )
+    parser.add_argument(
+        "--continue",
+        action="store_true",
+        dest="resume",
+        help="从上次自动存档继续游戏，并打印历史",
+    )
+    parser.add_argument(
+        "--seed",
+        help="种子文件路径（Markdown），定义游戏世界观、规则和目标",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="显示工具调用等调试信息",
     )
     return parser
 
 
 def print_banner() -> None:
     """Print a welcome banner."""
-    banner = r"""
-    ╔══════════════════════════════════════════╗
-    ║           U N F R A M E D                ║
-    ║     AI 自举叙事游戏 · 无预设框架         ║
-    ╚══════════════════════════════════════════╝
-
-AI 将从零开始构建世界观、规则、角色与剧情。
-输入你的行动或对话，按下回车继续故事。
-输入 /quit 退出，输入 /save <path> 存档，输入 /load <path> 读档。
-
-准备好了吗？输入任意内容开始你的冒险...
-
-"""
-    print(banner)
+    panel = Panel(
+        Text("AI 自举叙事游戏 · 无预设框架", justify="center"),
+        title="[bold]U N F R A M E D[/]",
+        title_align="center",
+        border_style="cyan",
+        padding=(1, 2),
+        subtitle="AI 从零构建世界观、规则、角色与剧情",
+    )
+    console.print()
+    console.print(panel)
+    console.print()
+    console.print(
+        "输入你的行动或对话，按下回车继续故事。\n"
+        "[dim]/quit 退出 | /save <path> 存档 | /load <path> 读档[/]"
+    )
+    console.print()
 
 
 # ======================================================================
-# Streaming Display
+# Streaming Display — BBCode 渲染
 # ======================================================================
 
 
-def _handle_stream(engine: GameEngine, player_input: str) -> bool:
-    """Run one game round and display the stream.
+def _handle_stream(engine: GameEngine, player_input: str, debug: bool = False) -> bool:
+    """Run one game round. Buffers all narrative, renders as Markdown when done.
+
+    Shows a spinner during AI thinking/tool-calling.
 
     Returns:
         ``True`` if the game should continue, ``False`` if it has ended.
     """
+    narrative = ""
     tool_names: List[str] = []
-    narrative_chunks: List[str] = []
+    spinner = _Spinner()
+    spinner.start("AI 正在构思剧情")
 
     for event in engine.play(player_input):
         if event["type"] == "content":
-            chunk = event["data"]
-            narrative_chunks.append(chunk)
-            print(chunk, end="", flush=True)
+            narrative += event["data"]
 
         elif event["type"] == "tool_call":
             fn_name = event["data"]["function"]["name"]
+            spinner.update(f"AI 正在{_TOOL_LABELS.get(fn_name, '调整世界')}")
             tool_names.append(fn_name)
-            # Optionally show tool progress:
-            # print(f"\n  [工具: {fn_name}]", end="", flush=True)
+
+            if debug:
+                spinner.stop()
+                raw_args = event["data"]["function"]["arguments"]
+                try:
+                    args = json.loads(raw_args)
+                except (json.JSONDecodeError, TypeError):
+                    args = raw_args
+                parts = [f"[debug] {fn_name}"]
+                if isinstance(args, dict):
+                    for k, v in args.items():
+                        parts.append(f"  {k}={v}")
+                sys.stdout.write("\033[2K" + "".join(parts) + "\n")
+                sys.stdout.flush()
+                spinner.start()
 
         elif event["type"] == "tool_result":
-            # Optionally show results:
-            # result = event["data"]["result"]
-            pass
+            if debug:
+                spinner.stop()
+                name = event["data"]["name"]
+                result = event["data"]["result"]
+                # Truncate long results
+                if len(result) > 120:
+                    result = result[:117] + "..."
+                sys.stdout.write(f"\033[2K[debug] {name} -> {result}\n")
+                sys.stdout.flush()
+                spinner.start()
 
         elif event["type"] == "error":
-            print(f"\n[系统错误] {event['data']}", file=sys.stderr)
+            spinner.stop()
+            console.print(f"\n[bold red]╴ 系统错误: {event['data']}[/]")
 
         elif event["type"] == "done":
-            # Ensure we end with a newline
-            if narrative_chunks:
-                print()
+            spinner.stop()
+            if narrative:
+                console.print(Markdown(narrative))
+                console.print()
 
     return not engine.is_ending
 
@@ -114,22 +266,24 @@ def _handle_stream(engine: GameEngine, player_input: str) -> bool:
 # ======================================================================
 
 
-def _save_game(engine: GameEngine, path: str) -> None:
+def _save_game(engine: GameEngine, path: str, quiet: bool = False) -> None:
     """Save the current game state to a JSON file."""
     try:
         state = engine.export_state()
         state["conversation"] = engine.export_conversation()
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
-        print(f"[存档已保存至 {path}]")
+        if not quiet:
+            console.print(f"[dim]✓ 存档已保存至 {path}[/]")
     except OSError as e:
-        print(f"[错误] 无法写入存档: {e}")
+        if not quiet:
+            console.print(f"[bold red]✗ 无法写入存档: {e}[/]")
 
 
 def _load_game(engine: GameEngine, path: str) -> None:
     """Load a game state from a JSON file."""
     if not os.path.exists(path):
-        print(f"[错误] 存档文件不存在: {path}")
+        console.print(f"[bold red]✗ 存档文件不存在: {path}[/]")
         return
 
     try:
@@ -140,9 +294,22 @@ def _load_game(engine: GameEngine, path: str) -> None:
         conversation = state.get("conversation", [])
         if conversation:
             engine.import_conversation(conversation)
-        print(f"[存档已加载: 第 {engine.round_num} 轮]")
+        console.print(f"[dim]✓ 存档已加载: 第 {engine.round_num} 轮[/]")
     except (json.JSONDecodeError, KeyError, TypeError) as e:
-        print(f"[错误] 无法读取存档: 文件格式损坏 ({e})")
+        console.print(f"[bold red]✗ 无法读取存档: 文件格式损坏 ({e})[/]")
+
+
+def _print_history(engine: GameEngine) -> None:
+    """打印对话历史中所有 AI 叙事内容。"""
+    first = True
+    for msg in engine.export_conversation():
+        if msg.get("role") == "assistant" and msg.get("content"):
+            if not first:
+                console.print("\n[dim]─[/]")
+            first = False
+            console.print(Markdown(msg["content"]))
+    console.print("\n[dim]━━━ 历史结束，继续游戏 ━━━[/]")
+    console.print()
 
 
 # ======================================================================
@@ -157,33 +324,66 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        print(
-            "错误：需要 API Key。请设置 OPENAI_API_KEY 环境变量"
-            "或通过 --api-key 参数传入。",
-            file=sys.stderr,
+        console.print(
+            "[bold red]错误：[/]需要 API Key。"
+            "请设置 [bold]OPENAI_API_KEY[/] 环境变量"
+            "或通过 [bold]--api-key[/] 参数传入。"
         )
         sys.exit(1)
 
+    base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
+    model = args.model or os.environ.get("OPENAI_MODEL", "gpt-4o")
+
     engine = GameEngine(
         api_key=api_key,
-        base_url=args.base_url,
-        model=args.model,
+        base_url=base_url,
+        model=model,
     )
+
+    # ---- --continue: 自动读档 + 打印历史 ----
+    if getattr(args, "resume", False):
+        if not os.path.exists(AUTOSAVE_PATH):
+            console.print("[bold red]没有找到自动存档，开始新游戏。[/]")
+        else:
+            _load_game(engine, AUTOSAVE_PATH)
+            _print_history(engine)
 
     print_banner()
 
-    # ---- Interactive game loop ----
-    while True:
+    # ---- 种子：作为第一轮输入自动发送 ----
+    seed_content: Optional[str] = None
+    if args.seed:
         try:
-            player_input = input("> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            print("\n游戏结束。")
-            break
+            with open(args.seed, "r", encoding="utf-8") as f:
+                seed_content = f.read()
+            console.print(f"[dim]已加载种子: {args.seed}[/]")
+        except (FileNotFoundError, OSError) as e:
+            console.print(f"[bold red]无法读取种子文件: {e}[/]")
+            sys.exit(1)
+
+    # ---- Interactive game loop ----
+    first_round = True
+
+    while True:
+        if first_round and seed_content:
+            # Auto-send seed as first player input
+            player_input = seed_content
+            seed_content = None  # only once
+        else:
+            try:
+                console.print()
+                player_input = input("\033[1;32m> \033[0m").strip()
+                console.print()
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                console.print("\n[dim]游戏结束。[/]")
+                break
+
+        first_round = False
 
         # -- Special commands --
         if player_input == "/quit":
-            print("游戏结束。感谢游玩！")
+            console.print("[dim]游戏结束。感谢游玩！[/]")
             break
 
         if player_input.startswith("/save "):
@@ -200,12 +400,13 @@ def main(argv: Optional[List[str]] = None) -> None:
             continue
 
         # -- Game round --
-        should_continue = _handle_stream(engine, player_input)
+        should_continue = _handle_stream(engine, player_input, debug=args.debug)
+        _save_game(engine, AUTOSAVE_PATH, quiet=True)
         if not should_continue:
-            print(
-                f"\n[故事结束] {engine.end_requested}"
+            console.print(
+                f"\n[bold yellow]╴ 故事结束[/] {engine.end_requested}"
             )
-            print("输入 /quit 退出，或继续输入进行自由探索。")
+            console.print("[dim]输入 /quit 退出，或继续输入进行自由探索。[/]")
 
     sys.exit(0)
 

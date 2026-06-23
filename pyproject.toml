@@ -26,6 +26,8 @@ classifiers = [
 ]
 dependencies = [
   "openai>=1.0.0",
+  "rich>=13.0.0",
+  "colorama>=0.4.6",
 ]
 
 [project.scripts]

@@ -16,8 +16,9 @@ def test_engine_creation():
     assert engine.var_count == 0
     assert not engine.is_ending
     assert sorted(engine.tools.list_tools()) == [
-        "get_var", "mark_as_end_node", "pin_var",
-        "set_var", "unpin_var",
+        "advance_plot", "append_plan_node", "get_var",
+        "mark_as_end_node", "pin_var", "set_root_plan_node",
+        "set_setting", "set_var", "unpin_var",
     ]
 
 
