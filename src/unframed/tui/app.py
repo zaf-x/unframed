@@ -595,7 +595,7 @@ class SlotPickerScreen(Screen):
                 si = str(i)
                 if si not in existing:
                     items.append((si, f"槽位 {si} — [dim]空[/]"))
-            items.sort(key=lambda x: int(x[0]))
+            items.sort(key=lambda x: (x[0].isdigit(), int(x[0]) if x[0].isdigit() else x[0]))
 
         if items:
             lv_items = [ListItem(Label(info)) for _, info in items]
