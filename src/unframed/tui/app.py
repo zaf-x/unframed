@@ -308,7 +308,7 @@ class GameScreen(Screen):
         height: 1fr;
         border: solid $primary;
         padding: 0 1;
-        content-align: top left;
+        content-align: left top;
     }
     #main-area {
         height: 1fr;
