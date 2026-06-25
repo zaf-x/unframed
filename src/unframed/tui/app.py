@@ -319,7 +319,7 @@ class GameScreen(Screen):
         yield LoadingIndicator(id="loading")
         yield Static(id="status-text")
         with Horizontal(id="input-bar"):
-            yield Input(placeholder="输入你的行动...", id="player-input", disabled=True)
+            yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
 
     def on_mount(self) -> None:
@@ -364,6 +364,7 @@ class GameScreen(Screen):
         gs: _GameState = self.app.game_state
         if gs.seed_content:
             self._first_round = False
+            self._running = True
             self._run_round(gs.seed_content)
             gs.seed_content = ""
         else:
