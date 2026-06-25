@@ -281,21 +281,13 @@ class GameScreen(Screen):
     }
     #loading {
         dock: bottom;
-        height: 1;
-        display: none;
-    }
-    #loading.-visible {
-        display: block;
+        height: 3;
     }
     #status-text {
         dock: bottom;
         height: 1;
         content-align: center middle;
         color: $text-disabled;
-        display: none;
-    }
-    #status-text.-visible {
-        display: block;
     }
     """
 
@@ -319,7 +311,7 @@ class GameScreen(Screen):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
         yield LoadingIndicator(id="loading")
-        yield Static(id="status-text")
+        yield Static(id="status-text", visible=False)
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
@@ -493,9 +485,9 @@ class GameScreen(Screen):
     def _show_loading(self, show: bool, status: str = "") -> None:
         """Toggle the loading indicator and status text."""
         loading = self.query_one("#loading", LoadingIndicator)
-        loading.set_class(show, "-visible")
+        loading.display = show
         s = self.query_one("#status-text", Static)
-        s.set_class(show, "-visible")
+        s.display = show
         if status:
             s.update(f"[dim]{status}...[/]")
         elif show:
