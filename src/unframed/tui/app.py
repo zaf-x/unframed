@@ -382,7 +382,7 @@ class GameScreen(Screen):
         shown = [(n, engine.vars_db[n]) for n in engine.shown_vars if n in engine.vars_db]
         if shown:
             for name, entry in shown:
-                lines.append(f"  {entry.meta}: {entry.value}")
+                lines.append(f"  {name}: {entry.value}")
         else:
             lines.append("  [dim]（空）[/]")
 
