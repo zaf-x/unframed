@@ -7,8 +7,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import sys
-from typing import Dict, List, Optional
+from typing import List
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -398,26 +397,38 @@ class GameScreen(Screen):
     def _run_round(self, player_input: str) -> None:
         engine = self._engine
         narrative = ""
-        last_tool = ""
 
-        for event in engine.play(player_input):
-            if event["type"] == "content":
-                narrative += event["data"]
-            elif event["type"] == "tool_call":
-                last_tool = event["data"]["function"]["name"]
-            elif event["type"] == "done":
-                pass
+        try:
+            for event in engine.play(player_input):
+                if event["type"] == "content":
+                    narrative += event["data"]
+                elif event["type"] == "done":
+                    pass
 
-        rendered = render(narrative) if narrative else ""
+            rendered = render(narrative) if narrative else ""
+            end_reason = engine.end_requested
+        except Exception as e:
+            rendered = ""
+            end_reason = None
+            err_msg = str(e)
+
+            def _error() -> None:
+                log = self.query_one("#narrative", RichLog)
+                log.write(f"\n[bold red]╴ 错误: {err_msg}[/]\n")
+                self._running = False
+                self._show_loading(False)
+                self.query_one("#player-input", Input).focus()
+
+            self.app.call_from_thread(_error)
+            return
 
         def _update() -> None:
             log = self.query_one("#narrative", RichLog)
             if rendered:
                 log.write(rendered + "\n")
 
-            # Check for end node
-            if engine.is_ending:
-                log.write(f"\n[bold yellow]故事结束：{engine.end_requested}[/]\n")
+            if end_reason:
+                log.write(f"\n[bold yellow]故事结束：{end_reason}[/]\n")
                 log.write("[dim]你可以继续输入进行自由探索。[/]\n")
 
             self._update_state_panel()
@@ -436,8 +447,8 @@ class GameScreen(Screen):
             os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
             with open(AUTOSAVE_PATH, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-        except OSError:
-            pass
+        except OSError as e:
+            self.app.notify(f"自动存档失败: {e}", severity="warning")
 
     def _show_loading(self, show: bool) -> None:
         loading = self.query_one("#loading", LoadingIndicator)
