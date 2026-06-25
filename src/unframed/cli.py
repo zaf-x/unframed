@@ -69,20 +69,26 @@ SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 
 
 def _find_seeds() -> List[dict]:
-    """Scans seeds directory, returns available seed files."""
+    """Scans seeds directory for .json seed files."""
     if not os.path.isdir(SEEDS_DIR):
         return []
     seeds = []
     for f in sorted(os.listdir(SEEDS_DIR)):
-        if f.endswith(".md"):
-            path = os.path.join(SEEDS_DIR, f)
-            name = f[:-3]
+        if f.endswith(".json"):
+            json_path = os.path.join(SEEDS_DIR, f)
             try:
-                with open(path, encoding="utf-8") as fh:
-                    first = fh.readline().strip().lstrip("# ")
-            except OSError:
-                first = ""
-            seeds.append({"name": name, "path": path, "desc": first})
+                with open(json_path, encoding="utf-8") as fh:
+                    meta = json.load(fh)
+                title = meta.get("title", f[:-5])
+                content_rel = meta.get("content", "")
+                content_path = os.path.join(SEEDS_DIR, content_rel) if content_rel else ""
+                seeds.append({
+                    "name": title,
+                    "path": content_path if os.path.exists(content_path) else "",
+                    "title": title,
+                })
+            except (json.JSONDecodeError, OSError):
+                continue
     return seeds
 
 
@@ -132,7 +138,7 @@ def _startup_menu() -> Optional[dict]:
     if has_autosave:
         items.append(("c", "继续上次游戏"))
     for i, s in enumerate(seeds, 1):
-        items.append((str(i), f"新游戏：{s['name']}  {s['desc']}"))
+        items.append((str(i), f"新游戏：[bold]《{s['title']}》[/]"))
     if not seeds:
         items.append(("n", "新游戏（无种子）"))
     if saves:
