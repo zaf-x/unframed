@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "openai>=1.0.0",
+  "ai-util @ git+https://github.com/zaf-x/ai-util.git",
   "rich>=13.0.0",
   "colorama>=0.4.6",
   "textual>=0.41.0",

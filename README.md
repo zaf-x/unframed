@@ -2,9 +2,6 @@
 
 **AI 自举叙事游戏** — AI 从零开始构建世界观、规则、角色与剧情。
 
-[![PyPI - Version](https://img.shields.io/pypi/v/unframed.svg)](https://pypi.org/project/unframed)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/unframed.svg)](https://pypi.org/project/unframed)
-
 ## 核心设计
 
 - **AI 是唯一的创世者**：没有硬编码的游戏机制，所有规则由 AI 在运行时自行定义。
@@ -15,7 +12,15 @@
 ## 安装
 
 ```bash
-pip install unframed
+pip install git+https://github.com/zaf-x/unframed.git
+```
+
+或克隆后本地安装：
+
+```bash
+git clone https://github.com/zaf-x/unframed.git
+cd unframed
+pip install .
 ```
 
 ## 使用
@@ -25,58 +30,80 @@ pip install unframed
 export OPENAI_API_KEY="sk-..."
 unframed
 
+# TUI 模式（推荐）
+unframed --tui
+
 # 指定模型（支持所有 OpenAI 兼容 API）
 unframed --model deepseek-chat
 
 # 自定义 API 地址
 unframed --base-url https://api.example.com/v1
+
+# 加载种子（剧本）
+unframed --seed seeds/cyberpunk.md
 ```
-
-### 游戏内命令
-
-| 命令 | 说明 |
-|------|------|
-| 直接输入 | 你的行动或对话，AI 会推进剧情 |
-| `/quit` | 退出游戏 |
-| `/save <path>` | 存档到文件 |
-| `/load <path>` | 从文件读档 |
 
 ## CLI 选项
 
 ```
 unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
+         [--seed SEED] [--continue] [--tui] [--debug]
 ```
 
-- `--api-key`：OpenAI 兼容 API Key（默认读 `OPENAI_API_KEY` 环境变量）
-- `--base-url`：自定义 API 地址
-- `--model`：模型名，默认 `gpt-4o`
+- `--api-key`：API Key（默认读 `OPENAI_API_KEY` 环境变量）
+- `--base-url`：自定义 API 地址（默认读 `OPENAI_BASE_URL`）
+- `--model`：模型名，默认 `gpt-4o`（可环境变量 `OPENAI_MODEL`）
+- `--seed`：种子文件路径
+- `--continue`：继续上次游戏
+- `--tui`：Textual 图形界面模式
+- `--debug`：显示工具调用详情
+
+## 游戏内命令
+
+| 命令 | 说明 |
+|------|------|
+| 直接输入 | 你的行动或对话，AI 会推进剧情 |
+| `/save` | 打开存档菜单 |
+| `/save 1` | 快速存到槽位 1 |
+| `/load` | 打开读档菜单 |
+| `/load 1` | 从槽位 1 读档 |
+| `/delete` | 打开删档菜单 |
+| `/quit` | 退出游戏 |
+
+## 种子（Seed）
+
+种子是游戏的剧本文件，定义了世界观、规则、角色和目标。内置种子：
+
+```
+赛博朋克：深渊回响  — 2087 年，永夜之城"新重庆"
+潮汐监狱           — 2147 年，深海环形海上堡垒
+```
+
+你也可以自己编写种子——参考 `docs/SEED_SPEC.md`。
 
 ## 开发
 
 ```bash
-# 克隆并安装
 git clone https://github.com/zaf-x/unframed.git
 cd unframed
-hatch env create
-pip install -e /path/to/ai-util  # 依赖 ai-util
-hatch run unframed --help
+pip install -e .
+```
 
-# 运行测试
-hatch run python tests/test_engine.py
+运行测试：
+
+```bash
+pip install -e ".[test]"
+python -m pytest tests/
 ```
 
 ## 架构
 
 - `src/unframed/engine.py` — 核心引擎：状态管理、工具定义、Prompt 组装、游戏循环
 - `src/unframed/cli.py` — 交互式 CLI 入口
+- `src/unframed/tui/app.py` — Textual TUI 前端
+- `src/unframed/render.py` — BBCode → ANSI 渲染器
 - 基于 [ai-util](https://github.com/zaf-x/ai-util) 框架
-
-## 依赖
-
-- Python >= 3.8
-- [ai-util](https://github.com/zaf-x/ai-util) >= 0.4
-- [openai](https://pypi.org/project/openai/) >= 1.0
 
 ## License
 
-`unframed` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+`unframed` 基于 MIT 协议开源。

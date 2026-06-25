@@ -5,7 +5,11 @@ __pycache__/
 venv/
 .venv/
 dist/
-build/
+*.spec
+
+# PyInstaller output
+build/*.exe
+build/*.manifest
 
 # IDE
 .vscode/

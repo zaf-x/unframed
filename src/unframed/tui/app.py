@@ -294,7 +294,6 @@ class GameScreen(Screen):
     BINDINGS = [
         ("ctrl+s", "save_menu", "存档"),
         ("ctrl+l", "load_menu", "读档"),
-        ("delete", "delete_menu", "删档"),
     ]
 
     CSS = """
@@ -447,7 +446,7 @@ class GameScreen(Screen):
         self._submit_input()
 
     def action_save_menu(self) -> None:
-        self._show_slot_picker("save")
+        self.app.push_screen(SaveManagerScreen(self._engine))
 
     def action_load_menu(self) -> None:
         self._show_slot_picker("load")
@@ -554,6 +553,192 @@ class GameScreen(Screen):
 
 # ======================================================================
 # Slot Picker (modal overlay for save/load/delete)
+# ======================================================================
+
+
+# ======================================================================
+# Save Manager Screen (Ctrl+S: save / delete / rename)
+# ======================================================================
+
+
+class SaveManagerScreen(Screen):
+    """Unified save slot manager: Enter=save, Delete=delete, R=rename."""
+
+    BINDINGS = [
+        ("delete", "delete_slot", "删除"),
+        ("r", "rename_slot", "重命名"),
+    ]
+
+    CSS = """
+    SaveManagerScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        padding: 1;
+        background: $surface;
+    }
+    .hint {
+        color: $text-disabled;
+        text-style: dim;
+    }
+    """
+
+    def __init__(self, engine: GameEngine) -> None:
+        super().__init__()
+        self._engine = engine
+        self._selectable_slots: list[str] = []
+        self._slot_infos: dict[str, str] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Static("[bold]存档管理[/]", id="dialog-title")
+
+        self._selectable_slots.clear()
+        self._slot_infos.clear()
+        items: list[tuple[str, str]] = []
+
+        if os.path.isdir(SAVES_DIR):
+            for f in sorted(os.listdir(SAVES_DIR)):
+                if f.startswith("slot_") and f.endswith(".json"):
+                    slot = f.replace("slot_", "").replace(".json", "")
+                    self._selectable_slots.append(slot)
+                    try:
+                        with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
+                            meta = json.load(fh)
+                        name = meta.get("slot_name", "")
+                        label = f"《{name}》" if name else f"槽位 {slot}"
+                        info = f"{label} — 第 {meta.get('round', '?')} 轮"
+                        if meta.get("save_time"):
+                            info += f"  [{_format_time(meta['save_time'])}]"
+                        self._slot_infos[slot] = info
+                        items.append((slot, info))
+                    except (json.JSONDecodeError, OSError):
+                        items.append((slot, f"槽位 {slot} — [dim]损坏[/]"))
+
+        existing = {s for s, _ in items}
+        for i in range(1, 6):
+            si = str(i)
+            if si not in existing:
+                items.append((si, f"槽位 {si} — [dim]空[/]"))
+                if si not in self._selectable_slots:
+                    self._selectable_slots.append(si)
+        items.sort(key=lambda x: (x[0].isdigit(), int(x[0]) if x[0].isdigit() else x[0]))
+        self._selectable_slots.sort(key=lambda x: (x.isdigit(), int(x) if x.isdigit() else x))
+
+        lv_items = [ListItem(Label(info)) for _, info in items]
+        lv_items.append(ListItem(Label("[dim]取消[/]")))
+        yield ListView(*lv_items, id="slot-list")
+        yield Static("[dim]Enter 保存  |  Delete 删除  |  R 重命名  |  q 关闭[/]", classes="hint")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        idx = event.list_view.index
+        if idx < len(self._selectable_slots):
+            self._save_to(idx)
+        self.app.pop_screen()
+
+    def action_delete_slot(self) -> None:
+        lv = self.query_one("#slot-list", ListView)
+        idx = lv.index
+        if idx is None or idx >= len(self._selectable_slots):
+            return
+        slot = self._selectable_slots[idx]
+        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+        if os.path.exists(path):
+            os.remove(path)
+            self.app.notify(f"已删除槽位 {slot}")
+            self._refresh()
+
+    def action_rename_slot(self) -> None:
+        lv = self.query_one("#slot-list", ListView)
+        idx = lv.index
+        if idx is None or idx >= len(self._selectable_slots):
+            return
+        slot = self._selectable_slots[idx]
+        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+        if not os.path.exists(path):
+            self.app.notify("该槽位为空，先保存再重命名", severity="warning")
+            return
+        self.app.push_screen(RenameScreen(slot, path))
+
+    def _save_to(self, idx: int) -> None:
+        slot = self._selectable_slots[idx]
+        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+        os.makedirs(SAVES_DIR, exist_ok=True)
+        state = self._engine.export_state()
+        state["conversation"] = self._engine.export_conversation()
+        state["save_time"] = datetime.datetime.now().isoformat()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+            self.app.notify(f"已保存到槽位 {slot}")
+            self.app.game_state.active_slot = slot
+        except OSError as e:
+            self.app.notify(f"保存失败: {e}", severity="error")
+
+    def _refresh(self) -> None:
+        self.app.pop_screen()
+        self.app.push_screen(SaveManagerScreen(self._engine))
+
+
+class RenameScreen(Screen):
+    """Inline rename prompt."""
+
+    CSS = """
+    RenameScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 50;
+        height: auto;
+        border: thick $primary;
+        padding: 1;
+        background: $surface;
+    }
+    """
+
+    def __init__(self, slot: str, path: str) -> None:
+        super().__init__()
+        self._slot = slot
+        self._path = path
+
+    def compose(self) -> ComposeResult:
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                meta = json.load(f)
+            current = meta.get("slot_name", "")
+        except (json.JSONDecodeError, OSError):
+            current = ""
+        yield Static(f"[bold]重命名槽位 {self._slot}[/]")
+        yield Input(value=current, placeholder="输入新名称...", id="rename-input")
+        yield Button("确认", id="confirm")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self._save_name()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._save_name()
+
+    def _save_name(self) -> None:
+        name = self.query_one("#rename-input", Input).value.strip()
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                state = json.load(f)
+            if name:
+                state["slot_name"] = name
+            else:
+                state.pop("slot_name", None)
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+            self.app.notify(f"已重命名为《{name}》" if name else "已清除名称")
+        except (json.JSONDecodeError, OSError) as e:
+            self.app.notify(f"重命名失败: {e}", severity="error")
+        self.app.pop_screen()
+
+
+# ======================================================================
+# Slot Picker Screen (load / delete via menu)
 # ======================================================================
 
 
