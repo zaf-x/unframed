@@ -598,6 +598,25 @@ class SlotPickerScreen(Screen):
                 except OSError as e:
                     self.app.notify(f"保存失败: {e}", severity="error")
 
+            elif self._mode == "load":
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        state = json.load(f)
+                    gs = self.app.game_state
+                    gs.engine = GameEngine(
+                        api_key=gs.api_key, base_url=gs.base_url, model=gs.model,
+                    )
+                    gs.engine.import_state(state)
+                    conv = state.get("conversation", [])
+                    if conv:
+                        gs.engine.import_conversation(conv)
+                    gs.initialized = True
+                    self.app.pop_screen()  # SlotPickerScreen
+                    self.app.pop_screen()  # GameScreen
+                    self.app.push_screen(GameScreen())
+                except (json.JSONDecodeError, OSError) as e:
+                    self.app.notify(f"读档失败: {e}", severity="error")
+
             elif self._mode == "delete":
                 try:
                     os.remove(path)
