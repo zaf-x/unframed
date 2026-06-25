@@ -385,7 +385,7 @@ class GameScreen(Screen):
         yield Header(show_clock=True, id="header")
         with Horizontal(id="main-area"):
             yield RichLog(id="narrative", markup=True, highlight=True)
-            yield Static(id="state-panel")
+            yield RichLog(id="state-panel", markup=True, highlight=True, wrap=True)
         with Vertical(id="bottom-bar"):
             with Horizontal(id="input-bar"):
                 yield Input(placeholder="输入你的行动...", id="player-input")
@@ -460,15 +460,16 @@ class GameScreen(Screen):
         """Update the right panel with player-visible variables."""
         engine = self._engine
         shown = [(n, engine.vars_db[n]) for n in engine.shown_vars if n in engine.vars_db]
-        lines = ["[bold cyan]角色状态[/]"]
+        panel = self.query_one("#state-panel", RichLog)
+        panel.clear()
+        panel.write(Markdown("**角色状态**"))
         if shown:
             for name, entry in shown:
-                lines.append(f"  {name}: {entry.value}")
+                panel.write(Markdown(f"- **{name}**: {entry.value}"))
+                panel.write("")  # blank line between entries
         else:
-            lines.append("  [dim]（空）[/]")
-        lines.append("")
-        lines.append(f"[dim]回合 {engine.round_num}[/]")
-        self.query_one("#state-panel", Static).update("\n".join(lines))
+            panel.write(Markdown("*(空)*"))
+        panel.write(Markdown(f"---\n回合 {engine.round_num}"))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "send-btn":
