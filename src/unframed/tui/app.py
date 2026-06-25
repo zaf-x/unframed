@@ -282,6 +282,7 @@ class GameScreen(Screen):
     #loading {
         dock: bottom;
         height: 3;
+        background: $surface;
     }
     #status-text {
         dock: bottom;
@@ -496,6 +497,7 @@ class GameScreen(Screen):
             s.update(f"[dim]{status}...[/]")
         elif show:
             s.update("[dim]AI 正在构思剧情...[/]")
+        self.refresh()
 
 
 # ======================================================================
