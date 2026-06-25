@@ -309,6 +309,9 @@ class GameScreen(Screen):
         border: solid $primary;
         padding: 1;
     }
+    #main-area {
+        height: 1fr;
+    }
     #input-bar {
         dock: bottom;
         height: 3;
@@ -344,7 +347,7 @@ class GameScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="header")
-        with Horizontal():
+        with Horizontal(id="main-area"):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
         yield Static(id="status-text")
