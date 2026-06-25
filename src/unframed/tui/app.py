@@ -15,6 +15,7 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import (
     Button,
+    Header,
     Input,
     Label,
     ListItem,
@@ -624,7 +625,8 @@ class SlotPickerScreen(Screen):
                 except OSError as e:
                     self.app.notify(f"删除失败: {e}", severity="error")
 
-        self.app.pop_screen()
+        if self._mode != "load":
+            self.app.pop_screen()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.app.pop_screen()
