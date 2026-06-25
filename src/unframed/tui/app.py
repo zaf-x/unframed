@@ -311,7 +311,7 @@ class GameScreen(Screen):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
         yield LoadingIndicator(id="loading")
-        yield Static(id="status-text", visible=False)
+        yield Static(id="status-text")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
@@ -322,6 +322,10 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
+        # Hide loading/status initially
+        self.query_one("#loading", LoadingIndicator).display = False
+        self.query_one("#status-text", Static).display = False
+
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
