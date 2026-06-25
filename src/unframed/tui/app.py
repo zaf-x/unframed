@@ -425,6 +425,7 @@ class GameScreen(Screen):
     def _run_round(self, player_input: str) -> None:
         engine = self._engine
         narrative = ""
+        user_text = player_input
 
         try:
             for event in engine.play(player_input):
@@ -456,6 +457,7 @@ class GameScreen(Screen):
 
         def _update() -> None:
             log = self.query_one("#narrative", RichLog)
+            log.write(f"\n[bold green]> {user_text}[/]\n\n")
             if rendered_md:
                 log.write(rendered_md)
 
