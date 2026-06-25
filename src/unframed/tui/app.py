@@ -296,9 +296,8 @@ class GameScreen(Screen):
             yield Static(id="state-panel")
         yield LoadingIndicator(id="loading")
         with Horizontal(id="input-bar"):
-            yield Input(placeholder="输入你的行动...", id="player-input")
+            yield Input(placeholder="输入你的行动...", id="player-input", disabled=True)
             yield Button("发送", id="send-btn", variant="primary")
-        yield Footer()
 
     def on_mount(self) -> None:
         """Defer engine setup until after mount completes."""
@@ -308,7 +307,6 @@ class GameScreen(Screen):
         """Initialize engine and restore state."""
         gs: _GameState = self.app.game_state
 
-        # Create engine if not loaded from save
         if not gs.initialized:
             gs.engine = GameEngine(
                 api_key=gs.api_key,
@@ -321,12 +319,32 @@ class GameScreen(Screen):
         self._running = False
         self._first_round = not gs.initialized
 
-        # Restore history for loaded saves
         if gs.initialized:
             self._restore_history(engine)
+            self._enable_input()
+        else:
+            self._show_loading(True)
+            log = self.query_one("#narrative", RichLog)
+            log.write("[dim]正在展开世界...[/]\n")
+            # Auto-send seed after a brief pause
+            self.set_timer(0.3, self._auto_send_seed)
 
+    def _enable_input(self) -> None:
+        """Focus the input field."""
         self._update_state_panel()
-        self.query_one("#player-input", Input).focus()
+        inp = self.query_one("#player-input", Input)
+        inp.disabled = False
+        inp.focus()
+
+    def _auto_send_seed(self) -> None:
+        """Trigger the first round with seed content."""
+        gs: _GameState = self.app.game_state
+        if gs.seed_content:
+            self._first_round = False
+            self._run_round(gs.seed_content)
+            gs.seed_content = ""
+        else:
+            self._enable_input()
 
     def _restore_history(self, engine: GameEngine) -> None:
         log = self.query_one("#narrative", RichLog)
@@ -386,14 +404,7 @@ class GameScreen(Screen):
         if not text:
             return
 
-        if self._first_round and self.app.game_state.seed_content:
-            text = self.app.game_state.seed_content
-            self.app.game_state.seed_content = ""
-            inp.value = ""
-        else:
-            inp.value = ""
-
-        self._first_round = False
+        inp.value = ""
         self._running = True
         self._show_loading(True)
         self._run_round(text)
@@ -422,7 +433,7 @@ class GameScreen(Screen):
                 log.write(f"\n[bold red]╴ 错误: {err_msg}[/]\n")
                 self._running = False
                 self._show_loading(False)
-                self.query_one("#player-input", Input).focus()
+                self._enable_input()
 
             self.app.call_from_thread(_error)
             return
@@ -440,7 +451,7 @@ class GameScreen(Screen):
             self._running = False
             self._show_loading(False)
             self._auto_save()
-            self.query_one("#player-input", Input).focus()
+            self._enable_input()
 
         self.app.call_from_thread(_update)
 
