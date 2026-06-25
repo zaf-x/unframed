@@ -294,7 +294,7 @@ class GameScreen(Screen):
     BINDINGS = [
         ("ctrl+s", "save_menu", "存档"),
         ("ctrl+l", "load_menu", "读档"),
-        ("ctrl+d", "delete_menu", "删档"),
+        ("delete", "delete_menu", "删档"),
     ]
 
     CSS = """
@@ -583,11 +583,13 @@ class SlotPickerScreen(Screen):
         title = labels.get(self._mode, "操作")
         yield Static(f"[bold]{title}[/]", id="dialog-title")
 
-        items = []
+        self._selectable_slots: list[str] = []
+        items: list[tuple[str, str]] = []
         if os.path.isdir(SAVES_DIR):
             for f in sorted(os.listdir(SAVES_DIR)):
                 if f.startswith("slot_") and f.endswith(".json"):
                     slot = f.replace("slot_", "").replace(".json", "")
+                    self._selectable_slots.append(slot)
                     try:
                         with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
                             meta = json.load(fh)
@@ -605,7 +607,10 @@ class SlotPickerScreen(Screen):
                 si = str(i)
                 if si not in existing:
                     items.append((si, f"槽位 {si} — [dim]空[/]"))
+                    if si not in self._selectable_slots:
+                        self._selectable_slots.append(si)
             items.sort(key=lambda x: (x[0].isdigit(), int(x[0]) if x[0].isdigit() else x[0]))
+            self._selectable_slots.sort(key=lambda x: (x.isdigit(), int(x) if x.isdigit() else x))
 
         if items:
             lv_items = [ListItem(Label(info)) for _, info in items]
@@ -618,20 +623,8 @@ class SlotPickerScreen(Screen):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
 
-        # Collect all slots
-        items = []
-        if os.path.isdir(SAVES_DIR):
-            for f in sorted(os.listdir(SAVES_DIR)):
-                if f.startswith("slot_") and f.endswith(".json"):
-                    slot = f.replace("slot_", "").replace(".json", "")
-                    items.append(slot)
-
-        if self._mode == "save":
-            # For save, show slots 1-5
-            items = [str(i) for i in range(1, 6)]
-
-        if idx < len(items):
-            slot = items[idx]
+        if idx < len(self._selectable_slots):
+            slot = self._selectable_slots[idx]
             path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
 
             if self._mode == "save":
