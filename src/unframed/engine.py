@@ -52,6 +52,11 @@ SYSTEM_PROMPT = """\
 3. 随着故事推进，调用 advance_plot 推进到下一节点。
 4. 推进后不可到达的节点将被自动删除。
 
+【玩家可见变量】
+- 使用 show_var 将关键状态（玩家血量、位置、装备等）显示在右侧面板，让玩家随时可见。
+- 使用 unshow_var 将不再需要的变量从面板移除。
+- 只显示玩家角色应该知道的信息，不要展示游戏机制的内部变量。
+
 【核心协议】
 1. 所有状态变更必须通过工具调用（set_var / get_var / pin_var / unpin_var）。
    不要只在叙事文本中描述状态变化，必须同步写入 vars。
@@ -235,6 +240,10 @@ class GameEngine:
         self.plot_current: Optional[PlanNode] = None
         """当前剧情节点。"""
 
+        # ---- 玩家可见变量 ----
+        self.shown_vars: set = set()
+        """通过 show_var 标记为玩家可见的变量名集合。"""
+
         # ---- Setup tools ----
         self.tools = Tools()
         self._register_tools()
@@ -302,6 +311,16 @@ class GameEngine:
         def advance_plot(target: str) -> str:
             """推进剧情到目标节点。推进后不可达的节点将被删除。"""
             return self._advance_plot(target)
+
+        @self.tools.add
+        def show_var(name: str) -> str:
+            """将指定变量标记为玩家可见，显示在右侧面板。"""
+            return self._show_var(name)
+
+        @self.tools.add
+        def unshow_var(name: str) -> str:
+            """将指定变量从右侧面板移除。"""
+            return self._unshow_var(name)
 
     # ==================================================================
     # Tool Implementations
@@ -515,6 +534,24 @@ class GameEngine:
 
         self.plot_current = target_node
         return f"剧情已推进到节点 {target}（{target_node.name}）"
+
+    # ==================================================================
+    # Player-visible Variables（玩家可见变量）
+    # ==================================================================
+
+    def _show_var(self, name: str) -> str:
+        """Mark a variable as visible to the player."""
+        if name not in self.vars_db:
+            return f"错误：变量 '{name}' 不存在。"
+        self.shown_vars.add(name)
+        return f"变量 '{name}' 已设为玩家可见。"
+
+    def _unshow_var(self, name: str) -> str:
+        """Remove a variable from the player-visible set."""
+        if name not in self.shown_vars:
+            return f"错误：变量 '{name}' 未在显示列表中。"
+        self.shown_vars.discard(name)
+        return f"变量 '{name}' 已从玩家可见列表中移除。"
 
     # ==================================================================
     # LRU Helpers
@@ -799,6 +836,7 @@ class GameEngine:
             "round": self.round_num,
             "end_requested": self.end_requested,
             "setting": self.setting,
+            "shown_vars": list(self.shown_vars),
             "vars": {
                 name: entry.to_dict()
                 for name, entry in self.vars_db.items()
@@ -819,6 +857,7 @@ class GameEngine:
         self.round_num = state.get("round", 0)
         self.end_requested = state.get("end_requested")
         self.setting = state.get("setting", "")
+        self.shown_vars = set(state.get("shown_vars", []))
         self.vars_db = {}
         for name, data in state.get("vars", {}).items():
             entry = VarEntry(

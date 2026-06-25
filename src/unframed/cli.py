@@ -326,6 +326,8 @@ _TOOL_LABELS = {
     "set_root_plan_node": "规划剧情主线",
     "append_plan_node": "规划剧情分支",
     "advance_plot": "推进剧情",
+    "show_var": "显示变量",
+    "unshow_var": "隐藏变量",
 }
 
 

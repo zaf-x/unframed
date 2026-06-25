@@ -309,6 +309,8 @@ class GameScreen(Screen):
         "set_root_plan_node": "正在规划剧情主线",
         "append_plan_node": "正在规划剧情分支",
         "advance_plot": "正在推进剧情",
+        "show_var": "正在显示变量",
+        "unshow_var": "正在隐藏变量",
     }
 
     def compose(self) -> ComposeResult:
@@ -380,10 +382,10 @@ class GameScreen(Screen):
         engine = self._engine
         lines: List[str] = []
 
-        lines.append("[bold cyan]核心设定[/]")
-        pinned = [(n, e) for n, e in engine.vars_db.items() if e.pinned]
-        if pinned:
-            for name, entry in pinned:
+        lines.append("[bold cyan]角色状态[/]")
+        shown = [(n, engine.vars_db[n]) for n in engine.shown_vars if n in engine.vars_db]
+        if shown:
+            for name, entry in shown:
                 lines.append(f"  {name}: {entry.value}")
         else:
             lines.append("  [dim]（空）[/]")

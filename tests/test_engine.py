@@ -18,7 +18,8 @@ def test_engine_creation():
     assert sorted(engine.tools.list_tools()) == [
         "advance_plot", "append_plan_node", "get_var",
         "mark_as_end_node", "pin_var", "set_root_plan_node",
-        "set_setting", "set_var", "unpin_var",
+        "set_setting", "set_var", "show_var",
+        "unpin_var", "unshow_var",
     ]
 
 
