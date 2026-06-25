@@ -358,6 +358,7 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
+        self._show_loading(False)
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
