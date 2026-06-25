@@ -312,8 +312,11 @@ class GameScreen(Screen):
     #main-area {
         height: 1fr;
     }
-    #input-bar {
+    #bottom-bar {
         dock: bottom;
+        height: 4;
+    }
+    #input-bar {
         height: 3;
         padding: 0 1;
     }
@@ -321,7 +324,6 @@ class GameScreen(Screen):
         width: 1fr;
     }
     #status-text {
-        dock: bottom;
         height: 1;
         content-align: center middle;
         color: $text-disabled;
@@ -350,10 +352,11 @@ class GameScreen(Screen):
         with Horizontal(id="main-area"):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
-        with Horizontal(id="input-bar"):
-            yield Input(placeholder="输入你的行动...", id="player-input")
-            yield Button("发送", id="send-btn", variant="primary")
-        yield Static("就绪", id="status-text")
+        with Vertical(id="bottom-bar"):
+            with Horizontal(id="input-bar"):
+                yield Input(placeholder="输入你的行动...", id="player-input")
+                yield Button("发送", id="send-btn", variant="primary")
+            yield Static("就绪", id="status-text")
 
     def on_mount(self) -> None:
         """Defer engine setup until after mount completes."""
