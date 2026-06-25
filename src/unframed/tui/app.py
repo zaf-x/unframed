@@ -1,14 +1,9 @@
 """
 unframed TUI — Textual-based frontend for the AI narrative game.
-
-Run with::
-
-    unframed --tui
 """
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
 import os
@@ -18,8 +13,7 @@ from typing import Dict, List, Optional
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
+from textual.screen import Screen
 from textual.widgets import (
     Button,
     Footer,
@@ -34,9 +28,8 @@ from textual.widgets import (
 )
 
 from ..engine import GameEngine
-from ..render import render
+from ..render import render, strip_tags
 
-# Paths
 AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
 SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "seeds"))
@@ -46,8 +39,8 @@ SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 # Helpers
 # ======================================================================
 
+
 def _find_seeds() -> List[dict]:
-    """Scan seeds directory for .json seed files."""
     if not os.path.isdir(SEEDS_DIR):
         return []
     seeds = []
@@ -67,22 +60,48 @@ def _find_seeds() -> List[dict]:
     return seeds
 
 
+def _format_time(ts: str) -> str:
+    if not ts:
+        return ""
+    try:
+        return datetime.datetime.fromisoformat(ts).strftime("%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return ts
+
+
 # ======================================================================
-# Screens
+# Mixin: shared game logic
+# ======================================================================
+
+
+class _GameState:
+    """Holds game engine and UI state across screens."""
+
+    def __init__(self) -> None:
+        self.api_key: str = os.environ.get("OPENAI_API_KEY", "")
+        self.base_url: str = os.environ.get("OPENAI_BASE_URL", "") or None
+        self.model: str = os.environ.get("OPENAI_MODEL", "gpt-4o")
+        self.engine: GameEngine | None = None
+        self.seed_content: str = ""
+        self.initialized: bool = False
+
+
+# ======================================================================
+# Startup Screen
 # ======================================================================
 
 
 class StartupScreen(Screen):
-    """Startup menu: new game or load."""
+    """Startup menu."""
 
     def compose(self) -> ComposeResult:
         yield Static("\n\n\n", classes="spacer")
         yield Static("[bold cyan]U N F R A M E D[/]", id="title")
         yield Static("AI 自举叙事游戏 · 无预设框架\n", classes="subtitle")
-        yield Label("启动选项：", classes="prompt")
         yield ListView(
             ListItem(Label("[bold]新游戏[/]")),
             ListItem(Label("加载存档")),
+            ListItem(Label("设置")),
             ListItem(Label("退出")),
             id="menu",
         )
@@ -94,11 +113,48 @@ class StartupScreen(Screen):
         elif idx == 1:
             self.app.push_screen(LoadScreen())
         elif idx == 2:
+            self.app.push_screen(SettingsScreen())
+        elif idx == 3:
             self.app.exit()
 
 
+# ======================================================================
+# Settings Screen
+# ======================================================================
+
+
+class SettingsScreen(Screen):
+    """API key and model settings."""
+
+    def compose(self) -> ComposeResult:
+        gs: _GameState = self.app.game_state
+        yield Static("\n")
+        yield Label("[bold]设置[/]", classes="prompt")
+        yield Input(placeholder="API Key", value=gs.api_key, id="api-key", password=True)
+        yield Input(placeholder="Base URL", value=gs.base_url or "", id="base-url")
+        yield Input(placeholder="Model", value=gs.model, id="model")
+        yield Button("保存", id="save-settings")
+        yield Button("返回", id="back")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        gs: _GameState = self.app.game_state
+        if event.button.id == "save-settings":
+            gs.api_key = self.query_one("#api-key", Input).value.strip()
+            gs.base_url = self.query_one("#base-url", Input).value.strip() or None
+            gs.model = self.query_one("#model", Input).value.strip() or "gpt-4o"
+            self.app.notify("设置已保存")
+            self.app.pop_screen()
+        elif event.button.id == "back":
+            self.app.pop_screen()
+
+
+# ======================================================================
+# Seed Picker Screen
+# ======================================================================
+
+
 class SeedPickerScreen(Screen):
-    """Seed selection screen."""
+    """Seed selection."""
 
     def compose(self) -> ComposeResult:
         seeds = _find_seeds()
@@ -112,20 +168,30 @@ class SeedPickerScreen(Screen):
         seeds = _find_seeds()
         idx = event.list_view.index
         if idx < len(seeds):
-            path = seeds[idx]["path"]
             try:
-                with open(path, encoding="utf-8") as f:
-                    content = f.read()
-                self.app.seed_content = content
-                self.app.push_screen(GameScreen())
+                with open(seeds[idx]["path"], encoding="utf-8") as f:
+                    self.app.game_state.seed_content = f.read()
+                self._start_game()
             except OSError as e:
                 self.app.notify(f"无法读取种子: {e}", severity="error")
         else:
             self.app.pop_screen()
 
+    def _start_game(self) -> None:
+        gs: _GameState = self.app.game_state
+        if not gs.api_key:
+            self.app.push_screen(SettingsScreen())
+            return
+        self.app.push_screen(GameScreen())
+
+
+# ======================================================================
+# Load Screen
+# ======================================================================
+
 
 class LoadScreen(Screen):
-    """Save slot selection screen."""
+    """Save slot selection."""
 
     def compose(self) -> ComposeResult:
         yield Static("\n")
@@ -138,11 +204,19 @@ class LoadScreen(Screen):
                     try:
                         with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
                             meta = json.load(fh)
-                        items.append(ListItem(Label(f"槽位 {slot} — 第 {meta.get('round', '?')} 轮")))
+                        info = f"槽位 {slot} — 第 {meta.get('round', '?')} 轮"
+                        if meta.get("save_time"):
+                            info += f"  [{_format_time(meta['save_time'])}]"
+                        items.append((os.path.join(SAVES_DIR, f), info))
                     except (json.JSONDecodeError, OSError):
-                        items.append(ListItem(Label(f"槽位 {slot} — [dim]损坏[/]")))
-        items.append(ListItem(Label("[dim]取消[/]")))
-        yield ListView(*items, id="load_list")
+                        items.append((os.path.join(SAVES_DIR, f), f"槽位 {slot} — [dim]损坏[/]"))
+        if not items:
+            yield Label("[dim]暂无存档[/]")
+            yield Button("返回", id="back")
+        else:
+            lv_items = [ListItem(Label(info)) for _, info in items]
+            lv_items.append(ListItem(Label("[dim]取消[/]")))
+            yield ListView(*lv_items, id="load_list")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
@@ -152,10 +226,24 @@ class LoadScreen(Screen):
                 if f.startswith("slot_") and f.endswith(".json"):
                     items.append(os.path.join(SAVES_DIR, f))
         if idx < len(items):
-            self.app.load_path = items[idx]
-            self.app.push_screen(GameScreen())
+            gs: _GameState = self.app.game_state
+            gs.engine = GameEngine(api_key=gs.api_key, base_url=gs.base_url, model=gs.model)
+            try:
+                with open(items[idx], encoding="utf-8") as f:
+                    state = json.load(f)
+                gs.engine.import_state(state)
+                conv = state.get("conversation", [])
+                if conv:
+                    gs.engine.import_conversation(conv)
+                gs.initialized = True
+                self.app.push_screen(GameScreen())
+            except (json.JSONDecodeError, OSError) as e:
+                self.app.notify(f"读档失败: {e}", severity="error")
         else:
             self.app.pop_screen()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.app.pop_screen()
 
 
 # ======================================================================
@@ -165,6 +253,12 @@ class LoadScreen(Screen):
 
 class GameScreen(Screen):
     """Main game interface."""
+
+    BINDINGS = [
+        ("ctrl+s", "save_menu", "存档"),
+        ("ctrl+l", "load_menu", "读档"),
+        ("ctrl+d", "delete_menu", "删档"),
+    ]
 
     CSS = """
     #narrative {
@@ -197,63 +291,49 @@ class GameScreen(Screen):
     """
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=True, id="header")
         with Horizontal():
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
         yield LoadingIndicator(id="loading")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
-            yield Button("发送", id="send-btn")
+            yield Button("发送", id="send-btn", variant="primary")
         yield Footer()
 
     def on_mount(self) -> None:
-        """Set up the game engine on mount."""
-        engine = GameEngine(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            base_url=os.environ.get("OPENAI_BASE_URL"),
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
-        )
+        gs: _GameState = self.app.game_state
 
-        # Load from save if provided
-        if hasattr(self.app, "load_path") and self.app.load_path:
-            path = self.app.load_path
-            try:
-                with open(path, encoding="utf-8") as f:
-                    state = json.load(f)
-                engine.import_state(state)
-                conv = state.get("conversation", [])
-                if conv:
-                    engine.import_conversation(conv)
-                self.app.notify(f"已读档：第 {engine.round_num} 轮")
-                self._restore_history(engine)
-            except (json.JSONDecodeError, OSError) as e:
-                self.app.notify(f"读档失败: {e}", severity="error")
+        # Create engine if not loaded from save
+        if not gs.initialized:
+            gs.engine = GameEngine(
+                api_key=gs.api_key,
+                base_url=gs.base_url,
+                model=gs.model,
+            )
 
-        # Seed content from picker
-        seed_content = getattr(self.app, "seed_content", None)
-
+        engine = gs.engine
         self._engine = engine
-        self._seed_content = seed_content
-        self._first_round = True
         self._running = False
+        self._first_round = not gs.initialized
+
+        # Restore history for loaded saves
+        if gs.initialized:
+            self._restore_history(engine)
 
         self._update_state_panel()
         self.query_one("#player-input", Input).focus()
 
     def _restore_history(self, engine: GameEngine) -> None:
-        """Restore previous narrative to the log."""
-        narrative = self.query_one("#narrative", RichLog)
+        log = self.query_one("#narrative", RichLog)
         for msg in engine.export_conversation():
             if msg.get("role") == "assistant" and msg.get("content"):
-                narrative.write(render(msg["content"]) + "\n")
+                log.write(render(msg["content"]) + "\n")
 
     def _update_state_panel(self) -> None:
-        """Refresh the state sidebar."""
         engine = self._engine
-        lines = []
+        lines: List[str] = []
 
-        # Core zone
         lines.append("[bold cyan]核心区[/]")
         pinned = [(n, e) for n, e in engine.vars_db.items() if e.pinned]
         if pinned:
@@ -262,13 +342,11 @@ class GameScreen(Screen):
         else:
             lines.append("  [dim]（空）[/]")
 
-        # Plot tree
         if engine.plot_root:
             lines.append("")
             lines.append("[bold cyan]剧情树[/]")
             if engine.plot_current:
-                lines.append(f"  当前: {engine.plot_current.name}")
-            lines.append(f"  节点数: {engine.var_count}")
+                lines.append(f"  ▶ {engine.plot_current.name}")
 
         lines.append("")
         lines.append(f"[dim]回合 {engine.round_num}[/]")
@@ -276,16 +354,26 @@ class GameScreen(Screen):
         self.query_one("#state-panel", Static).update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle send button."""
         if event.button.id == "send-btn":
             self._submit_input()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter in input field."""
         self._submit_input()
 
+    def action_save_menu(self) -> None:
+        self._show_slot_picker("save")
+
+    def action_load_menu(self) -> None:
+        self._show_slot_picker("load")
+
+    def action_delete_menu(self) -> None:
+        self._show_slot_picker("delete")
+
+    def _show_slot_picker(self, mode: str) -> None:
+        """Show a slot picker for save/load/delete."""
+        self.app.push_screen(SlotPickerScreen(mode, self._engine))
+
     def _submit_input(self) -> None:
-        """Process player input in a worker thread."""
         if self._running:
             return
 
@@ -294,10 +382,9 @@ class GameScreen(Screen):
         if not text:
             return
 
-        # Seed: auto-send on first round
-        if self._first_round and self._seed_content:
-            text = self._seed_content
-            self._seed_content = None
+        if self._first_round and self.app.game_state.seed_content:
+            text = self.app.game_state.seed_content
+            self.app.game_state.seed_content = ""
             inp.value = ""
         else:
             inp.value = ""
@@ -305,52 +392,163 @@ class GameScreen(Screen):
         self._first_round = False
         self._running = True
         self._show_loading(True)
-
-        # Run game round in thread
         self._run_round(text)
 
     @work(thread=True)
     def _run_round(self, player_input: str) -> None:
-        """Execute a game round in a background thread."""
         engine = self._engine
         narrative = ""
-        narrative_rendered = ""
+        last_tool = ""
 
         for event in engine.play(player_input):
             if event["type"] == "content":
                 narrative += event["data"]
+            elif event["type"] == "tool_call":
+                last_tool = event["data"]["function"]["name"]
             elif event["type"] == "done":
-                if narrative:
-                    narrative_rendered = render(narrative)
+                pass
 
-        # Update UI from thread
+        rendered = render(narrative) if narrative else ""
+
         def _update() -> None:
-            nonlocal narrative_rendered
             log = self.query_one("#narrative", RichLog)
-            if narrative_rendered:
-                log.write(narrative_rendered + "\n")
+            if rendered:
+                log.write(rendered + "\n")
+
+            # Check for end node
+            if engine.is_ending:
+                log.write(f"\n[bold yellow]故事结束：{engine.end_requested}[/]\n")
+                log.write("[dim]你可以继续输入进行自由探索。[/]\n")
+
             self._update_state_panel()
             self._running = False
             self._show_loading(False)
+            self._auto_save()
             self.query_one("#player-input", Input).focus()
-
-            # Auto-save
-            try:
-                state = engine.export_state()
-                state["conversation"] = engine.export_conversation()
-                state["save_time"] = datetime.datetime.now().isoformat()
-                os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
-                with open(AUTOSAVE_PATH, "w", encoding="utf-8") as f:
-                    json.dump(state, f, ensure_ascii=False, indent=2)
-            except OSError:
-                pass
 
         self.app.call_from_thread(_update)
 
+    def _auto_save(self) -> None:
+        try:
+            state = self._engine.export_state()
+            state["conversation"] = self._engine.export_conversation()
+            state["save_time"] = datetime.datetime.now().isoformat()
+            os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
+            with open(AUTOSAVE_PATH, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
     def _show_loading(self, show: bool) -> None:
-        """Toggle the loading indicator."""
         loading = self.query_one("#loading", LoadingIndicator)
         loading.set_class(show, "-visible")
+
+
+# ======================================================================
+# Slot Picker (modal overlay for save/load/delete)
+# ======================================================================
+
+
+class SlotPickerScreen(Screen):
+    """Modal overlay for selecting a save slot."""
+
+    CSS = """
+    SlotPickerScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 50;
+        height: auto;
+        border: thick $primary;
+        padding: 1;
+        background: $surface;
+    }
+    """
+
+    def __init__(self, mode: str, engine: GameEngine) -> None:
+        super().__init__()
+        self._mode = mode
+        self._engine = engine
+
+    def compose(self) -> ComposeResult:
+        labels = {"save": "存档", "load": "读档", "delete": "删档"}
+        title = labels.get(self._mode, "操作")
+        yield Static(f"[bold]{title}[/]", id="dialog-title")
+
+        items = []
+        if os.path.isdir(SAVES_DIR):
+            for f in sorted(os.listdir(SAVES_DIR)):
+                if f.startswith("slot_") and f.endswith(".json"):
+                    slot = f.replace("slot_", "").replace(".json", "")
+                    try:
+                        with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
+                            meta = json.load(fh)
+                        info = f"槽位 {slot} — 第 {meta.get('round', '?')} 轮"
+                        if meta.get("save_time"):
+                            info += f"  [{_format_time(meta['save_time'])}]"
+                        items.append((slot, info))
+                    except (json.JSONDecodeError, OSError):
+                        items.append((slot, f"槽位 {slot} — [dim]损坏[/]"))
+
+        # Always show empty slots up to 5 for saving
+        if self._mode == "save":
+            existing = {s for s, _ in items}
+            for i in range(1, 6):
+                si = str(i)
+                if si not in existing:
+                    items.append((si, f"槽位 {si} — [dim]空[/]"))
+            items.sort(key=lambda x: int(x[0]))
+
+        if items:
+            lv_items = [ListItem(Label(info)) for _, info in items]
+            lv_items.append(ListItem(Label("[dim]取消[/]")))
+            yield ListView(*lv_items, id="slot-list")
+        else:
+            yield Label("[dim]暂无存档[/]")
+            yield Button("返回", id="close")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        idx = event.list_view.index
+
+        # Collect all slots
+        items = []
+        if os.path.isdir(SAVES_DIR):
+            for f in sorted(os.listdir(SAVES_DIR)):
+                if f.startswith("slot_") and f.endswith(".json"):
+                    slot = f.replace("slot_", "").replace(".json", "")
+                    items.append(slot)
+
+        if self._mode == "save":
+            # For save, show slots 1-5
+            items = [str(i) for i in range(1, 6)]
+
+        if idx < len(items):
+            slot = items[idx]
+            path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+
+            if self._mode == "save":
+                os.makedirs(SAVES_DIR, exist_ok=True)
+                state = self._engine.export_state()
+                state["conversation"] = self._engine.export_conversation()
+                state["save_time"] = datetime.datetime.now().isoformat()
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(state, f, ensure_ascii=False, indent=2)
+                    self.app.notify(f"已保存到槽位 {slot}")
+                except OSError as e:
+                    self.app.notify(f"保存失败: {e}", severity="error")
+
+            elif self._mode == "delete":
+                try:
+                    os.remove(path)
+                    self.app.notify(f"已删除槽位 {slot}")
+                except OSError as e:
+                    self.app.notify(f"删除失败: {e}", severity="error")
+
+        self.app.pop_screen()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.app.pop_screen()
 
 
 # ======================================================================
@@ -385,22 +583,26 @@ class UnframedApp(App):
         height: auto;
         max-height: 12;
     }
+    Button {
+        margin: 1 4;
+    }
+    Input {
+        margin: 0 4;
+    }
     """
 
-    seed_content: str = ""
-    load_path: str = ""
+    game_state: _GameState
 
     def __init__(self) -> None:
         super().__init__()
-        self.seed_content = ""
-        self.load_path = ""
+        self.game_state = _GameState()
 
     def on_ready(self) -> None:
         self.push_screen(StartupScreen())
 
 
 def main() -> None:
-    """Entry point for the TUI."""
+    """Entry point."""
     app = UnframedApp()
     app.run()
 
