@@ -264,11 +264,10 @@ class GameScreen(Screen):
         border: solid $primary;
         padding: 1;
     }
-    #state-panel {
-        width: 30%;
-        height: 1fr;
-        border: solid $primary;
-        padding: 1;
+    #state-bar {
+        height: 1;
+        content-align: center middle;
+        color: $text-disabled;
     }
     #input-bar {
         dock: bottom;
@@ -308,9 +307,8 @@ class GameScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="header")
-        with Horizontal():
-            yield RichLog(id="narrative", markup=True, highlight=True)
-            yield Static(id="state-panel")
+        yield Static(id="state-bar")
+        yield RichLog(id="narrative", markup=True, highlight=True)
         yield Static(id="status-text", classes="hidden")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
@@ -380,21 +378,14 @@ class GameScreen(Screen):
                 log.write(Markdown(msg["content"]))
 
     def _update_state_panel(self) -> None:
+        """Update the top state bar with key player info."""
         engine = self._engine
-        lines: List[str] = []
-
-        lines.append("[bold cyan]角色状态[/]")
         shown = [(n, engine.vars_db[n]) for n in engine.shown_vars if n in engine.vars_db]
+        parts = [f"回合 {engine.round_num}"]
         if shown:
-            for name, entry in shown:
-                lines.append(f"  {name}: {entry.value}")
-        else:
-            lines.append("  [dim]（空）[/]")
-
-        lines.append("")
-        lines.append(f"[dim]回合 {engine.round_num}[/]")
-
-        self.query_one("#state-panel", Static).update("\n".join(lines))
+            for name, entry in shown[:5]:
+                parts.append(f"{name}: {entry.value}")
+        self.query_one("#state-bar", Static).update("  [dim]|[/]  ".join(parts))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "send-btn":
