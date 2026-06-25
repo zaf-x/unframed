@@ -33,6 +33,11 @@ SAVES_DIR = os.path.expanduser("~/.unframed_saves")
 SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "seeds"))
 
 
+def _save_slot_path(slot: str) -> str:
+    os.makedirs(SAVES_DIR, exist_ok=True)
+    return os.path.join(SAVES_DIR, f"slot_{slot}.json")
+
+
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -480,8 +485,9 @@ class GameScreen(Screen):
             state = self._engine.export_state()
             state["conversation"] = self._engine.export_conversation()
             state["save_time"] = datetime.datetime.now().isoformat()
-            os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
-            with open(AUTOSAVE_PATH, "w", encoding="utf-8") as f:
+            path = _save_slot_path("auto")
+            os.makedirs(SAVES_DIR, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
         except OSError as e:
             self.app.notify(f"自动存档失败: {e}", severity="warning")
