@@ -287,7 +287,29 @@ class GameScreen(Screen):
     #loading.-visible {
         display: block;
     }
+    #status-text {
+        dock: bottom;
+        height: 1;
+        content-align: center middle;
+        color: $text-dim;
+        display: none;
+    }
+    #status-text.-visible {
+        display: block;
+    }
     """
+
+    _TOOL_LABELS = {
+        "set_var": "正在修改世界状态",
+        "get_var": "正在读取变量",
+        "pin_var": "正在固定核心变量",
+        "unpin_var": "正在释放核心变量",
+        "mark_as_end_node": "正在准备结局",
+        "set_setting": "正在锁定游戏设定",
+        "set_root_plan_node": "正在规划剧情主线",
+        "append_plan_node": "正在规划剧情分支",
+        "advance_plot": "正在推进剧情",
+    }
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, id="header")
@@ -295,6 +317,7 @@ class GameScreen(Screen):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
         yield LoadingIndicator(id="loading")
+        yield Static(id="status-text")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input", disabled=True)
             yield Button("发送", id="send-btn", variant="primary")
@@ -418,6 +441,10 @@ class GameScreen(Screen):
             for event in engine.play(player_input):
                 if event["type"] == "content":
                     narrative += event["data"]
+                elif event["type"] == "tool_call":
+                    fn = event["data"]["function"]["name"]
+                    label = self._TOOL_LABELS.get(fn, "正在调整世界")
+                    self.app.call_from_thread(lambda l=label: self._show_loading(True, l))
                 elif event["type"] == "done":
                     pass
 
@@ -466,9 +493,16 @@ class GameScreen(Screen):
         except OSError as e:
             self.app.notify(f"自动存档失败: {e}", severity="warning")
 
-    def _show_loading(self, show: bool) -> None:
+    def _show_loading(self, show: bool, status: str = "") -> None:
+        """Toggle the loading indicator and status text."""
         loading = self.query_one("#loading", LoadingIndicator)
         loading.set_class(show, "-visible")
+        s = self.query_one("#status-text", Static)
+        s.set_class(show, "-visible")
+        if status:
+            s.update(f"[dim]{status}...[/]")
+        elif show:
+            s.update("[dim]AI 正在构思剧情...[/]")
 
 
 # ======================================================================
