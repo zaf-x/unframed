@@ -321,11 +321,9 @@ class GameScreen(Screen):
         width: 1fr;
     }
     #status-text {
-        width: auto;
-        max-width: 20;
+        width: 22;
         content-align: center middle;
         color: $text-disabled;
-        padding: 0 1;
     }
     #status-text.active {
         color: $success;
