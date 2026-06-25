@@ -20,7 +20,6 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
-    LoadingIndicator,
     RichLog,
     Static,
 )
@@ -279,16 +278,17 @@ class GameScreen(Screen):
     Input {
         width: 1fr;
     }
-    #loading {
-        dock: bottom;
-        height: 3;
-        background: $surface;
-    }
     #status-text {
         dock: bottom;
         height: 1;
         content-align: center middle;
         color: $text-disabled;
+    }
+    #status-text.hidden {
+        display: none;
+    }
+    .hidden {
+        display: none;
     }
     """
 
@@ -311,8 +311,7 @@ class GameScreen(Screen):
         with Horizontal():
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
-        yield LoadingIndicator(id="loading")
-        yield Static(id="status-text")
+        yield Static(id="status-text", classes="hidden")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
@@ -323,10 +322,6 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
-        # Hide loading/status initially
-        self.query_one("#loading", LoadingIndicator).display = False
-        self.query_one("#status-text", Static).display = False
-
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
@@ -488,16 +483,13 @@ class GameScreen(Screen):
             self.app.notify(f"自动存档失败: {e}", severity="warning")
 
     def _show_loading(self, show: bool, status: str = "") -> None:
-        """Toggle the loading indicator and status text."""
-        loading = self.query_one("#loading", LoadingIndicator)
-        loading.display = show
+        """Toggle the status indicator."""
         s = self.query_one("#status-text", Static)
-        s.display = show
+        s.set_class(not show, "hidden")
         if status:
-            s.update(f"[dim]{status}...[/]")
+            s.update(f"[bold green]{status}...[/]")
         elif show:
-            s.update("[dim]AI 正在构思剧情...[/]")
-        self.refresh()
+            s.update("[bold green]AI 正在构思剧情...[/]")
 
 
 # ======================================================================
