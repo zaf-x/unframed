@@ -32,6 +32,9 @@ dependencies = [
   "textual>=0.41.0",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [project.scripts]
 unframed = "unframed.cli:main"
 unframed-tui = "unframed.tui.app:main"

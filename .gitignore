@@ -8,6 +8,7 @@ dist/
 *.spec
 
 # PyInstaller output
+build/unframed/
 build/*.exe
 build/*.manifest
 

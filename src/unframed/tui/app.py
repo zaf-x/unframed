@@ -27,6 +27,12 @@ from textual.widgets import (
 from rich.markdown import Markdown
 
 from ..engine import GameEngine
+from ..settings import (
+    DEFAULT_MODEL,
+    DEFAULT_TEMPERATURE,
+    load_settings,
+    save_settings,
+)
 
 AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
@@ -81,12 +87,21 @@ class _GameState:
     """Holds game engine and UI state across screens."""
 
     def __init__(self) -> None:
-        self.api_key: str = os.environ.get("OPENAI_API_KEY", "")
-        self.base_url: str = os.environ.get("OPENAI_BASE_URL", "") or None
-        self.model: str = os.environ.get("OPENAI_MODEL", "gpt-4o")
+        settings = load_settings()
+        self.api_key: str = os.environ.get("OPENAI_API_KEY") or settings.get("api_key") or ""
+        self.base_url: str | None = (
+            os.environ.get("OPENAI_BASE_URL") or settings.get("base_url") or None
+        )
+        self.model: str = os.environ.get("OPENAI_MODEL") or settings.get("model") or DEFAULT_MODEL
+        self.temperature: float = float(
+            os.environ.get("OPENAI_TEMPERATURE")
+            or settings.get("temperature")
+            or DEFAULT_TEMPERATURE
+        )
         self.engine: GameEngine | None = None
         self.seed_content: str = ""
         self.initialized: bool = False
+        self.active_slot: str | None = None
         self.active_slot: str | None = None
 
 
@@ -131,7 +146,7 @@ class StartupScreen(Screen):
 
 
 class SettingsScreen(Screen):
-    """API key and model settings."""
+    """API key, model, and temperature settings."""
 
     def compose(self) -> ComposeResult:
         gs: _GameState = self.app.game_state
@@ -140,6 +155,7 @@ class SettingsScreen(Screen):
         yield Input(placeholder="API Key", value=gs.api_key, id="api-key", password=True)
         yield Input(placeholder="Base URL", value=gs.base_url or "", id="base-url")
         yield Input(placeholder="Model", value=gs.model, id="model")
+        yield Input(placeholder="Temperature", value=str(gs.temperature), id="temperature")
         yield Button("保存", id="save-settings")
         yield Button("返回", id="back")
 
@@ -148,7 +164,20 @@ class SettingsScreen(Screen):
         if event.button.id == "save-settings":
             gs.api_key = self.query_one("#api-key", Input).value.strip()
             gs.base_url = self.query_one("#base-url", Input).value.strip() or None
-            gs.model = self.query_one("#model", Input).value.strip() or "gpt-4o"
+            gs.model = self.query_one("#model", Input).value.strip() or DEFAULT_MODEL
+            temp_str = self.query_one("#temperature", Input).value.strip()
+            try:
+                gs.temperature = float(temp_str) if temp_str else DEFAULT_TEMPERATURE
+            except ValueError:
+                gs.temperature = DEFAULT_TEMPERATURE
+            save_settings(
+                {
+                    "api_key": gs.api_key,
+                    "base_url": gs.base_url,
+                    "model": gs.model,
+                    "temperature": gs.temperature,
+                }
+            )
             self.app.notify("设置已保存")
             self.app.pop_screen()
         elif event.button.id == "back":
@@ -264,7 +293,9 @@ class LoadScreen(Screen):
                     items.append(os.path.join(SAVES_DIR, f))
         if idx < len(items):
             gs: _GameState = self.app.game_state
-            gs.engine = GameEngine(api_key=gs.api_key, base_url=gs.base_url, model=gs.model)
+            gs.engine = GameEngine(
+                api_key=gs.api_key, base_url=gs.base_url, model=gs.model, temperature=gs.temperature
+            )
             try:
                 with open(items[idx], encoding="utf-8") as f:
                     state = json.load(f)
@@ -374,6 +405,7 @@ class GameScreen(Screen):
                 api_key=gs.api_key,
                 base_url=gs.base_url,
                 model=gs.model,
+                temperature=gs.temperature,
             )
 
         engine = gs.engine
@@ -831,7 +863,10 @@ class SlotPickerScreen(Screen):
                         state = json.load(f)
                     gs = self.app.game_state
                     gs.engine = GameEngine(
-                        api_key=gs.api_key, base_url=gs.base_url, model=gs.model,
+                        api_key=gs.api_key,
+                        base_url=gs.base_url,
+                        model=gs.model,
+                        temperature=gs.temperature,
                     )
                     gs.engine.import_state(state)
                     conv = state.get("conversation", [])

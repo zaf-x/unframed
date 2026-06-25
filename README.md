@@ -26,18 +26,20 @@ pip install .
 ## 使用
 
 ```bash
-# 需要设置 OPENAI_API_KEY 环境变量
+# 需要设置 OPENAI_API_KEY 环境变量，或在 TUI 设置页填写
 export OPENAI_API_KEY="sk-..."
-unframed
+unframed              # 默认启动 TUI
 
-# TUI 模式（推荐）
-unframed --tui
+unframed --cli        # CLI 模式
 
 # 指定模型（支持所有 OpenAI 兼容 API）
 unframed --model deepseek-chat
 
 # 自定义 API 地址
 unframed --base-url https://api.example.com/v1
+
+# 调整温度
+unframed --temperature 0.9
 
 # 加载种子（剧本）
 unframed --seed seeds/cyberpunk.md
@@ -47,16 +49,19 @@ unframed --seed seeds/cyberpunk.md
 
 ```
 unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
-         [--seed SEED] [--continue] [--tui] [--debug]
+         [--temperature TEMP] [--seed SEED] [--continue] [--cli] [--debug]
 ```
 
-- `--api-key`：API Key（默认读 `OPENAI_API_KEY` 环境变量）
-- `--base-url`：自定义 API 地址（默认读 `OPENAI_BASE_URL`）
-- `--model`：模型名，默认 `gpt-4o`（可环境变量 `OPENAI_MODEL`）
+- `--api-key`：API Key（默认读 `OPENAI_API_KEY` 环境变量或配置文件）
+- `--base-url`：自定义 API 地址（默认读 `OPENAI_BASE_URL` 或配置文件）
+- `--model`：模型名，默认 `gpt-4o`（可环境变量 `OPENAI_MODEL` 或配置文件）
+- `--temperature`：模型采样温度，默认 `0.7`（可环境变量 `OPENAI_TEMPERATURE`）
 - `--seed`：种子文件路径
 - `--continue`：继续上次游戏
-- `--tui`：Textual 图形界面模式
+- `--cli`：使用 CLI 模式（默认 TUI）
 - `--debug`：显示工具调用详情
+
+设置保存在 `~/.unframed_config.json`（权限 0o600），TUI 中点击“设置”即可修改。
 
 ## 游戏内命令
 

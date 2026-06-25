@@ -8,10 +8,10 @@ unframed 是一个 AI 驱动的叙事游戏。没有预设的游戏机制——A
 
 ```bash
 # 启动游戏
-hatch run unframed           # 启动菜单（推荐）
-hatch run unframed --tui     # 图形界面模式
-hatch run unframed --seed seeds/xxx.md  # 跳过菜单直接加载种子
-hatch run unframed --continue           # 继续上次游戏
+unframed              # 启动 TUI 界面（默认）
+unframed --cli        # CLI 模式
+unframed --seed seeds/xxx.md  # 跳过菜单直接加载种子
+unframed --cli --continue     # CLI 模式继续上次游戏
 ```
 
 ## 游戏界面

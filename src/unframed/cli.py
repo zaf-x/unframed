@@ -27,7 +27,7 @@ import termios
 import threading
 import time
 import tty
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # ---- Colorama: 跨平台 ANSI 支持 ----
 import colorama
@@ -55,6 +55,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .engine import GameEngine
+from .settings import load_settings, save_settings, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 
 
 # ======================================================================
@@ -336,22 +337,32 @@ _TOOL_LABELS = {
 # ======================================================================
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="unframed",
-        description="AI 叙事游戏 — AI 从零构建世界观、规则、角色与剧情",
+        description="AI 叙事游戏 — AI 从零构建世界观、规则、角色与剧情（默认 TUI）",
+        add_help=False,
     )
     parser.add_argument(
         "--api-key",
-        help="OpenAI-compatible API key (default: OPENAI_API_KEY env)",
+        default=defaults.get("api_key"),
+        help="OpenAI-compatible API key (default: OPENAI_API_KEY env or config)",
     )
     parser.add_argument(
         "--base-url",
-        help="Custom API base URL (default: OPENAI_BASE_URL env)",
+        default=defaults.get("base_url"),
+        help="Custom API base URL (default: OPENAI_BASE_URL env or config)",
     )
     parser.add_argument(
         "--model",
-        help="Model name (default: gpt-4o, overridable via OPENAI_MODEL env)",
+        default=defaults.get("model"),
+        help="Model name (default: config or gpt-4o)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=defaults.get("temperature"),
+        help="Sampling temperature (default: config or 0.7)",
     )
     parser.add_argument(
         "--continue",
@@ -369,9 +380,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="显示工具调用等调试信息",
     )
     parser.add_argument(
-        "--tui",
+        "--cli",
         action="store_true",
-        help="使用 Textual TUI 界面（实验性）",
+        help="使用 CLI 模式（默认 TUI）",
+    )
+    parser.add_argument(
+        "-h", "--help",
+        action="store_true",
+        help="显示完整帮助文档",
     )
     return parser
 
@@ -646,19 +662,44 @@ def _print_history(engine: GameEngine) -> None:
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main entry point for ``unframed``."""
-    parser = _build_parser()
+    # ---- Load persisted settings first; env vars take precedence. ----
+    settings = load_settings()
+    defaults = {
+        "api_key": os.environ.get("OPENAI_API_KEY") or settings.get("api_key") or "",
+        "base_url": os.environ.get("OPENAI_BASE_URL") or settings.get("base_url") or None,
+        "model": os.environ.get("OPENAI_MODEL") or settings.get("model") or DEFAULT_MODEL,
+        "temperature": float(
+            os.environ.get("OPENAI_TEMPERATURE")
+            or settings.get("temperature")
+            or DEFAULT_TEMPERATURE
+        ),
+    }
+
+    parser = _build_parser(defaults)
     args = parser.parse_args(argv)
 
-    # ---- TUI mode ----
-    if getattr(args, "tui", False):
+    # ---- 默认 TUI，除非指定 --cli 或需 CLI 的参数 ----
+    use_cli = (
+        getattr(args, "cli", False)
+        or args.seed
+        or getattr(args, "resume", False)
+        or args.debug
+    )
+
+    # ---- 完整帮助文档 ----
+    if getattr(args, "help", False):
+        _show_help()
+        sys.exit(0)
+
+    if not use_cli:
         try:
             from unframed.tui.app import main as tui_main
             tui_main()
         except ImportError as e:
-            console.print(f"[bold red]TUI 不可用: {e}[/]")
-            console.print("请安装 textual: pip install textual")
-            sys.exit(1)
-        sys.exit(0)
+            console.print(f"[bold red]TUI 不可用，回退 CLI: {e}[/]")
+            use_cli = True
+        else:
+            sys.exit(0)
 
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -670,12 +711,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
 
     base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
-    model = args.model or os.environ.get("OPENAI_MODEL", "gpt-4o")
+    model = args.model or os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
+    temperature = args.temperature
 
     engine = GameEngine(
         api_key=api_key,
         base_url=base_url,
         model=model,
+        temperature=temperature,
     )
 
     # ---- 启动流程 ----
