@@ -308,6 +308,7 @@ class GameScreen(Screen):
         height: 1fr;
         border: solid $primary;
         padding: 0 1;
+        content-align: top left;
     }
     #main-area {
         height: 1fr;
@@ -322,6 +323,9 @@ class GameScreen(Screen):
     }
     Input {
         width: 1fr;
+    }
+    Button {
+        margin: 0;
     }
     #status-text {
         height: 1;
