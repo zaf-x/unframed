@@ -43,6 +43,7 @@ SYSTEM_PROMPT = """\
 - 你必须严格遵守种子的所有设定，不得违反任何种子内规定。
 - 游戏开始后，请立即调用 set_setting 工具来锁定本局游戏的设定内容。
 - 设定一旦锁定不可更改、不可违反。设定将被附加到每轮提示词的开头。
+- **游戏开始后，必须先向玩家输出背景设定和前提情要**，介绍当前世界、玩家身份、所处环境，然后才开始正式叙事。
 - **每次游戏开始时，必须明确向玩家陈述本局游戏的最终目标。** 使用 pin_var 将目标写入核心区，方便始终可见。
 
 【剧情规划】
@@ -218,7 +219,7 @@ class GameEngine:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: str = "gpt-4o",
-        max_history_rounds: int = 20,
+        max_history_rounds: int = 500,
     ) -> None:
         self.vars_db: Dict[str, VarEntry] = {}
         self.round_num: int = 0
@@ -591,10 +592,29 @@ class GameEngine:
         parts.append("")
         parts.append(f"[玩家输入]\n玩家说：\"{player_input}\"")
         parts.append("")
-        parts.append(
-            "[指令]\n"
-            "请根据当前状态生成叙事，并决定是否需要调用工具修改状态。"
-        )
+
+        # [指令] — 根据游戏阶段动态调整
+        if self.round_num == 0 and not self.setting:
+            parts.append(
+                "[指令]\n"
+                "这是游戏的第一轮，请严格按顺序执行以下步骤：\n"
+                "1. 调用 set_setting 锁定本局设定\n"
+                "2. 调用 set_root_plan_node 设置剧情根节点\n"
+                "3. 调用 append_plan_node 至少规划 2 个剧情节点\n"
+                "4. 向玩家输出背景设定与前提情要\n"
+                "5. 用 set_var(..., pin=True) 将玩家最终目标写入核心区\n"
+                "6. 开始正式叙事，引导玩家做出第一个选择"
+            )
+        elif self.round_num <= 2 and not self.plot_root:
+            parts.append(
+                "[指令]\n"
+                "请先完成游戏初始化：设置设定、规划剧情、输出背景与目标。"
+            )
+        else:
+            parts.append(
+                "[指令]\n"
+                "请根据当前状态生成叙事，并决定是否需要调用工具修改状态。"
+            )
         return "\n".join(parts)
 
     def _build_pinned_zone(self) -> str:
