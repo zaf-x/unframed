@@ -323,12 +323,6 @@ class GameScreen(Screen):
         content-align: center middle;
         color: $text-disabled;
     }
-    #status-text.hidden {
-        display: none;
-    }
-    .hidden {
-        display: none;
-    }
     """
 
     _TOOL_LABELS = {
@@ -350,7 +344,7 @@ class GameScreen(Screen):
         with Horizontal():
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
-        yield Static(id="status-text", classes="hidden")
+        yield Static(id="status-text")
         with Horizontal(id="input-bar"):
             yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
@@ -361,6 +355,7 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
+        self.query_one("#status-text", Static).display = False
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
@@ -536,7 +531,7 @@ class GameScreen(Screen):
     def _show_loading(self, show: bool, status: str = "") -> None:
         """Toggle the status indicator."""
         s = self.query_one("#status-text", Static)
-        s.set_class(not show, "hidden")
+        s.display = show
         if status:
             s.update(f"[bold green]{status}...[/]")
         elif show:
