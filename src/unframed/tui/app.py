@@ -314,7 +314,7 @@ class GameScreen(Screen):
     }
     #input-bar {
         dock: bottom;
-        height: 3;
+        height: 5;
         padding: 0 1;
     }
     Input {
@@ -322,7 +322,8 @@ class GameScreen(Screen):
     }
     #status-text {
         dock: bottom;
-        height: 1;
+        height: 2;
+        min-height: 2;
         content-align: center middle;
         color: $text-disabled;
     }
