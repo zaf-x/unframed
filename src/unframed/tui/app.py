@@ -301,13 +301,13 @@ class GameScreen(Screen):
     #narrative {
         height: 1fr;
         border: solid $primary;
-        padding: 1;
+        padding: 0 1;
     }
     #state-panel {
         width: 30%;
         height: 1fr;
         border: solid $primary;
-        padding: 1;
+        padding: 0 1;
     }
     #main-area {
         height: 1fr;
