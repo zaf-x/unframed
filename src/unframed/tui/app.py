@@ -106,6 +106,7 @@ class StartupScreen(Screen):
             ListItem(Label("[bold]新游戏[/]")),
             ListItem(Label("加载存档")),
             ListItem(Label("设置")),
+            ListItem(Label("文档")),
             ListItem(Label("退出")),
             id="menu",
         )
@@ -119,6 +120,8 @@ class StartupScreen(Screen):
         elif idx == 2:
             self.app.push_screen(SettingsScreen())
         elif idx == 3:
+            self.app.push_screen(HelpScreen())
+        elif idx == 4:
             self.app.exit()
 
 
@@ -150,6 +153,36 @@ class SettingsScreen(Screen):
             self.app.pop_screen()
         elif event.button.id == "back":
             self.app.pop_screen()
+
+
+# ======================================================================
+# Help Screen
+# ======================================================================
+
+
+class HelpScreen(Screen):
+    """Display the player help document."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("\n")
+        yield Static("[bold cyan]unframed 玩家手册[/]", classes="prompt")
+        yield Static("\n")
+        yield Static("[bold]什么是 unframed？[/]")
+        yield Static("AI 驱动的叙事游戏。没有预设机制——AI 从零构建一切。\n")
+        yield Static("[bold]快捷键[/]")
+        yield Static("  Ctrl+S  保存  |  Ctrl+L  读档  |  Ctrl+D  删档\n")
+        yield Static("[bold]游戏命令（CLI 模式）[/]")
+        yield Static("  /save [槽位]   |  /load [槽位]  |  /delete  |  /quit\n")
+        yield Static("[bold]给玩家的建议[/]")
+        yield Static("  • 主动行动，AI 会根据你的选择推进剧情")
+        yield Static("  • 可以随时询问环境信息")
+        yield Static("  • 没有预设规则，你觉得合理的事都可以尝试")
+        yield Static("  • 想改变方向直接说\n")
+        yield Static("完整文档: [dim]docs/HELP.md[/]")
+        yield Button("返回", id="back")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.app.pop_screen()
 
 
 # ======================================================================

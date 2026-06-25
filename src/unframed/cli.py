@@ -476,16 +476,33 @@ def _menu_selector(items: List[str]) -> Optional[int]:
 # ======================================================================
 
 
+def _show_help() -> None:
+    """Print help information."""
+    help_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "docs", "HELP.md"))
+    if os.path.exists(help_path):
+        with open(help_path, encoding="utf-8") as f:
+            content = f.read()
+        console.print(Markdown(content))
+    else:
+        console.print("[red]帮助文档未找到[/]")
+    console.print()
+    console.print("[dim]按 Enter 返回...[/]")
+    input()
+
+
 def _startup_greeting() -> Optional[str]:
     """Show banner + arrow-key menu. Returns 'new' or 'load', or None to quit."""
     print_banner()
-    idx = _menu_selector(["新游戏", "加载存档", "退出"])
+    idx = _menu_selector(["新游戏", "加载存档", "帮助文档", "退出"])
     if idx is None:
         return None
     if idx == 0:
         return "new"
     if idx == 1:
         return "load"
+    if idx == 2:
+        _show_help()
+        return None
     return None
 
 
