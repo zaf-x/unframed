@@ -323,6 +323,9 @@ class GameScreen(Screen):
         content-align: center middle;
         color: $text-disabled;
     }
+    #status-text.active {
+        color: $success;
+    }
     """
 
     _TOOL_LABELS = {
@@ -355,7 +358,6 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
-        self.query_one("#status-text", Static).display = False
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
@@ -529,13 +531,15 @@ class GameScreen(Screen):
             self.app.notify(f"自动存档失败: {e}", severity="warning")
 
     def _show_loading(self, show: bool, status: str = "") -> None:
-        """Toggle the status indicator."""
+        """Update the status bar."""
         s = self.query_one("#status-text", Static)
-        s.display = show
+        s.set_class(show, "active")
         if status:
-            s.update(f"[bold green]{status}...[/]")
+            s.update(f"[bold]{status}...[/]")
         elif show:
-            s.update("[bold green]AI 正在构思剧情...[/]")
+            s.update("[bold]AI 正在构思剧情...[/]")
+        else:
+            s.update("就绪")
 
 
 # ======================================================================
