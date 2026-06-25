@@ -321,11 +321,11 @@ class GameScreen(Screen):
         width: 1fr;
     }
     #status-text {
-        dock: bottom;
-        height: 2;
-        min-height: 2;
+        width: auto;
+        max-width: 20;
         content-align: center middle;
         color: $text-disabled;
+        padding: 0 1;
     }
     #status-text.active {
         color: $success;
@@ -351,8 +351,8 @@ class GameScreen(Screen):
         with Horizontal(id="main-area"):
             yield RichLog(id="narrative", markup=True, highlight=True)
             yield Static(id="state-panel")
-        yield Static(id="status-text")
         with Horizontal(id="input-bar"):
+            yield Static("就绪", id="status-text")
             yield Input(placeholder="输入你的行动...", id="player-input")
             yield Button("发送", id="send-btn", variant="primary")
 
@@ -362,7 +362,6 @@ class GameScreen(Screen):
 
     def _setup_engine(self) -> None:
         """Initialize engine and restore state."""
-        self._show_loading(False)
         gs: _GameState = self.app.game_state
 
         if not gs.initialized:
