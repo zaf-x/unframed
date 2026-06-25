@@ -15,8 +15,6 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import (
     Button,
-    Footer,
-    Header,
     Input,
     Label,
     ListItem,
@@ -26,8 +24,9 @@ from textual.widgets import (
     Static,
 )
 
+from rich.markdown import Markdown
+
 from ..engine import GameEngine
-from ..render import render, strip_tags
 
 AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
@@ -373,7 +372,7 @@ class GameScreen(Screen):
         log = self.query_one("#narrative", RichLog)
         for msg in engine.export_conversation():
             if msg.get("role") == "assistant" and msg.get("content"):
-                log.write(render(msg["content"]) + "\n")
+                log.write(Markdown(msg["content"]))
 
     def _update_state_panel(self) -> None:
         engine = self._engine
@@ -448,7 +447,7 @@ class GameScreen(Screen):
                 elif event["type"] == "done":
                     pass
 
-            rendered = render(narrative) if narrative else ""
+            rendered_md = Markdown(narrative) if narrative else None
             end_reason = engine.end_requested
         except Exception as e:
             rendered = ""
@@ -467,8 +466,8 @@ class GameScreen(Screen):
 
         def _update() -> None:
             log = self.query_one("#narrative", RichLog)
-            if rendered:
-                log.write(rendered + "\n")
+            if rendered_md:
+                log.write(rendered_md)
 
             if end_reason:
                 log.write(f"\n[bold yellow]故事结束：{end_reason}[/]\n")
