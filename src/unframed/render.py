@@ -18,6 +18,7 @@ BBCode → ANSI 终端渲染器。
 from __future__ import annotations
 
 import re
+from io import StringIO
 from typing import Dict
 
 
@@ -137,7 +138,6 @@ class BBCodeRenderer:
 
 def render(text: str) -> str:
     """一次性渲染（非流式），返回带 ANSI 码的字符串。"""
-    from io import StringIO
     buf = StringIO()
     r = BBCodeRenderer(write=buf.write)
     r.feed(text)
@@ -147,4 +147,4 @@ def render(text: str) -> str:
 
 def strip_tags(text: str) -> str:
     """移除所有 [tag] 标记，留下纯文本。"""
-    return re.sub(r"\[/?(?:\w+)(?:=\w+)?\]", "", text)
+    return re.sub(r"\[/?(?:\w+)(?:=[^\]]+)?\]", "", text)

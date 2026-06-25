@@ -643,9 +643,9 @@ class GameEngine:
         active = non_pinned[:MAX_ACTIVE]
 
         if not active:
-            return "=== 活跃区（最近20个）===\n（暂无活跃变量）"
+            return f"=== 活跃区（最近{MAX_ACTIVE}个）===\n（暂无活跃变量）"
 
-        lines = ["=== 活跃区（最近20个）==="]
+        lines = [f"=== 活跃区（最近{MAX_ACTIVE}个）==="]
         for name, entry in active:
             lines.append(f"{name}: {entry.value} | {entry.meta}")
         return "\n".join(lines)
@@ -685,7 +685,8 @@ class GameEngine:
         def _dump(node: PlanNode, depth: int) -> None:
             marker = " ◀" if node is self.plot_current else ""
             indent = "  " * depth
-            prefix = "└" if depth == 0 else "├"
+            is_last = node.parent is None or node is node.parent.children[-1]
+            prefix = "└" if is_last else "├"
             lines.append(f"{indent}{prefix} {node.node_id}: {node.name}{marker}")
             for child in node.children:
                 _dump(child, depth + 1)
@@ -751,7 +752,7 @@ class GameEngine:
         - ``{"type": "tool_call", "data": dict}`` — tool invocation
         - ``{"type": "tool_result", "data": {...}}`` — tool execution result
         - ``{"type": "done", "data": str}`` — stream complete
-        - ``type": "error", "data": str}`` — error occurred
+        - ``{"type": "error", "data": str}`` — error occurred
         """
         prompt = self.build_prompt(player_input)
         yield from self.agent.stream_msg(prompt)

@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import datetime
 import itertools
 import json
 import os
 import sys
+import termios
 import threading
 import time
+import tty
 from typing import List, Optional
 
 # ---- Colorama: 跨平台 ANSI 支持 ----
@@ -82,10 +85,11 @@ def _find_seeds() -> List[dict]:
                 title = meta.get("title", f[:-5])
                 content_rel = meta.get("content", "")
                 content_path = os.path.join(SEEDS_DIR, content_rel) if content_rel else ""
+                if not content_path or not os.path.exists(content_path):
+                    continue
                 seeds.append({
-                    "name": title,
-                    "path": content_path if os.path.exists(content_path) else "",
                     "title": title,
+                    "path": content_path,
                 })
             except (json.JSONDecodeError, OSError):
                 continue
@@ -96,10 +100,25 @@ def _find_seeds() -> List[dict]:
 # 存档管理
 # ======================================================================
 
+MAX_SLOTS = 10
 
 def _save_slot_path(slot: str) -> str:
     os.makedirs(SAVES_DIR, exist_ok=True)
     return os.path.join(SAVES_DIR, f"slot_{slot}.json")
+
+
+def _save_meta(path: str) -> Optional[dict]:
+    """Read save file metadata without loading the full game."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return None
+    return {
+        "round": data.get("round", "?"),
+        "time": data.get("save_time", ""),
+        "model": data.get("model", ""),
+    }
 
 
 def _list_saves() -> List[dict]:
@@ -110,92 +129,131 @@ def _list_saves() -> List[dict]:
         if f.startswith("slot_") and f.endswith(".json"):
             slot = f.replace("slot_", "").replace(".json", "")
             path = os.path.join(SAVES_DIR, f)
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    meta = json.load(fh)
-                saves.append({"slot": slot, "path": path, "round": meta.get("round", "?")})
-            except (json.JSONDecodeError, OSError):
-                saves.append({"slot": slot, "path": path, "round": "?"})
+            meta = _save_meta(path)
+            if meta:
+                saves.append({"slot": slot, "path": path, **meta})
     return saves
+
+
+def _format_time(ts: str) -> str:
+    """Format ISO timestamp for display."""
+    if not ts:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(ts)
+        return dt.strftime("%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return ts
+
+
+def _show_save_slots(highlight: Optional[str] = None) -> None:
+    """Display save slots 1-10 with existing save info."""
+    saves = {s["slot"]: s for s in _list_saves()}
+    console.print()
+    console.print("[bold]存档槽位：[/]")
+    for i in range(1, MAX_SLOTS + 1):
+        si = str(i)
+        if si in saves:
+            s = saves[si]
+            info = f"第 {s['round']} 轮"
+            if s.get("time"):
+                info += f"  {_format_time(s['time'])}"
+            marker = " [bold green]◀[/]" if si == highlight else ""
+            console.print(f"  [bold]{i}[/]  {info}{marker}")
+        else:
+            marker = " [bold green]◀[/]" if si == highlight else ""
+            console.print(f"  [bold]{i}[/]  [dim]空[/]{marker}")
+    console.print(f"  [bold]q[/]  取消")
+
+
+def _confirm(msg: str) -> bool:
+    """Ask for y/n confirmation."""
+    console.print()
+    console.print(f"[yellow]{msg} (y/n)[/]")
+    while True:
+        c = input("\033[1;32m>\033[0m ").strip().lower()
+        if c == "y":
+            return True
+        if c == "n":
+            return False
+        console.print("[red]请输入 y 或 n[/]")
+
+
+def _save_menu(engine: GameEngine) -> None:
+    """Interactive save menu."""
+    _show_save_slots()
+    console.print()
+
+    while True:
+        pick = input("\033[1;32m存到哪个槽位？\033[0m ").strip()
+        if pick == "q":
+            return
+        if pick.isdigit():
+            n = int(pick)
+            if n < 1 or n > MAX_SLOTS:
+                console.print(f"[red]槽位 1-{MAX_SLOTS}[/]")
+                continue
+            path = _save_slot_path(pick)
+            if os.path.exists(path) and not _confirm("该槽位已有存档，覆盖？"):
+                return
+            _save_game(engine, path)
+            return
+        console.print("[red]无效[/]")
+
+
+def _load_menu(engine: GameEngine) -> bool:
+    """Interactive load menu. Returns True if a save was loaded."""
+    saves = _list_saves()
+    if not saves:
+        console.print("[dim]暂无存档[/]")
+        return False
+
+    _show_save_slots()
+    console.print()
+
+    while True:
+        pick = input("\033[1;32m读哪个槽位？\033[0m ").strip()
+        if pick == "q":
+            return False
+        if pick.isdigit():
+            path = _save_slot_path(pick)
+            if not os.path.exists(path):
+                console.print("[red]该槽位为空[/]")
+                continue
+            _load_game(engine, path)
+            return True
+        console.print("[red]无效[/]")
+
+
+def _delete_menu() -> None:
+    """Interactive delete save menu."""
+    saves = _list_saves()
+    if not saves:
+        console.print("[dim]暂无存档可删除[/]")
+        return
+
+    _show_save_slots()
+    console.print()
+
+    while True:
+        pick = input("\033[1;32m删除哪个槽位？\033[0m ").strip()
+        if pick == "q":
+            return
+        if pick.isdigit():
+            path = _save_slot_path(pick)
+            if not os.path.exists(path):
+                console.print("[red]该槽位为空[/]")
+                continue
+            if _confirm(f"确定删除槽位 {pick}？"):
+                os.remove(path)
+                console.print(f"[dim]已删除槽位 {pick}[/]")
+            return
+        console.print("[red]无效[/]")
 
 
 # ======================================================================
 # 启动菜单
 # ======================================================================
-
-
-def _startup_menu() -> Optional[dict]:
-    """Show menu, return {'action':..., 'path':...} or None to quit."""
-    seeds = _find_seeds()
-    saves = _list_saves()
-    has_autosave = os.path.exists(AUTOSAVE_PATH)
-
-    console.print()
-    console.print("[bold]启动选项：[/]")
-    console.print()
-
-    items = []
-    if has_autosave:
-        items.append(("c", "继续上次游戏"))
-    for i, s in enumerate(seeds, 1):
-        items.append((str(i), f"新游戏：[bold]《{s['title']}》[/]"))
-    if not seeds:
-        items.append(("n", "新游戏（无种子）"))
-    if saves:
-        items.append(("l", "读档"))
-    items.append(("q", "退出"))
-
-    for key, label in items:
-        console.print(f"  [bold green]{key}[/]  {label}")
-
-    while True:
-        pick = input("\033[1;32m> \033[0m").strip().lower()
-        if pick == "q":
-            return None
-        if pick == "c" and has_autosave:
-            return {"action": "continue", "path": AUTOSAVE_PATH}
-        if pick == "l" and saves:
-            return {"action": "load_menu", "saves": saves}
-        if pick == "n" and not seeds:
-            return {"action": "new", "seed": None}
-        if seeds and pick.isdigit():
-            idx = int(pick) - 1
-            if 0 <= idx < len(seeds):
-                return {"action": "new", "seed": seeds[idx]["path"]}
-        console.print("[red]无效选择[/]")
-
-
-def _show_saves() -> None:
-    """显示所有存档槽位。"""
-    saves = _list_saves()
-    if not saves:
-        console.print("[dim]暂无存档。使用 /save <数字> 存档[/]")
-        return
-    console.print("[bold]存档列表：[/]")
-    for s in saves:
-        console.print(f"  [bold green]{s['slot']}[/]  第 {s['round']} 轮")
-
-
-def _show_load_menu(engine: GameEngine) -> None:
-    """显示读档选择菜单。"""
-    saves = _list_saves()
-    if not saves:
-        console.print("[dim]暂无存档。[/]")
-        return
-    console.print("[bold]读档：选择存档槽位[/]")
-    for s in saves:
-        console.print(f"  [bold green]{s['slot']}[/]  第 {s['round']} 轮")
-    console.print("  [bold green]q[/]  取消")
-    while True:
-        pick = input("\033[1;32m> \033[0m").strip().lower()
-        if pick == "q":
-            return
-        if pick.isdigit():
-            path = _save_slot_path(pick)
-            if os.path.exists(path):
-                _load_game(engine, path)
-                return
-        console.print("[red]无效选择[/]")
 
 
 # ======================================================================
@@ -312,7 +370,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def print_banner() -> None:
-    """Print a welcome banner."""
+    """Print the welcome banner."""
     panel = Panel(
         Text("AI 自举叙事游戏 · 无预设框架", justify="center"),
         title="[bold]U N F R A M E D[/]",
@@ -324,11 +382,116 @@ def print_banner() -> None:
     console.print()
     console.print(panel)
     console.print()
-    console.print(
-        "输入你的行动或对话，按下回车继续故事。\n"
-        "[dim]/quit 退出 | /save <path> 存档 | /load <path> 读档[/]"
-    )
-    console.print()
+
+
+# ======================================================================
+# 键盘输入与菜单组件
+# ======================================================================
+
+
+def _read_key() -> str:
+    """Read a single keypress. Returns 'up'/'down'/'enter'/'q' or the char."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            seq = sys.stdin.read(2)
+            if seq == "[A":
+                return "up"
+            if seq == "[B":
+                return "down"
+            return "escape"
+        if ch == "\r" or ch == "\n":
+            return "enter"
+        return ch.lower()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _menu_selector(items: List[str]) -> Optional[int]:
+    """Show a list of items with arrow-key navigation.
+
+    Args:
+        items: List of display strings.
+
+    Returns:
+        Selected index (0-based), or ``None`` if cancelled.
+    """
+    n = len(items)
+    sel = 0
+
+    def _render() -> None:
+        for i, item in enumerate(items):
+            if i == sel:
+                sys.stdout.write(f"\033[2K\r  \033[7m {item} \033[0m\n")
+            else:
+                sys.stdout.write(f"\033[2K\r  {item}\n")
+        sys.stdout.write(f"\033[2K\r  [dim]↑↓ 选择 | Enter 确认 | q 取消[/]\n")
+        sys.stdout.flush()
+
+    _render()
+    # Move cursor up to allow overwriting
+    cursor_up = n + 1
+
+    while True:
+        key = _read_key()
+        if key == "up" and sel > 0:
+            sel -= 1
+        elif key == "down" and sel < n - 1:
+            sel += 1
+        elif key == "enter":
+            # Clear menu
+            sys.stdout.write(f"\033[{cursor_up}A")
+            for i in range(cursor_up):
+                sys.stdout.write("\033[2K\r\n")
+            sys.stdout.write(f"\033[{cursor_up}A")
+            sys.stdout.flush()
+            return sel
+        elif key == "q":
+            sys.stdout.write(f"\033[{cursor_up}A")
+            for i in range(cursor_up):
+                sys.stdout.write("\033[2K\r\n")
+            sys.stdout.write(f"\033[{cursor_up}A")
+            sys.stdout.flush()
+            return None
+        else:
+            continue
+
+        # Re-render
+        sys.stdout.write(f"\033[{cursor_up}A")
+        _render()
+
+
+# ======================================================================
+# 启动菜单
+# ======================================================================
+
+
+def _startup_greeting() -> Optional[str]:
+    """Show banner + arrow-key menu. Returns 'new' or 'load', or None to quit."""
+    print_banner()
+    idx = _menu_selector(["新游戏", "加载存档", "退出"])
+    if idx is None:
+        return None
+    if idx == 0:
+        return "new"
+    if idx == 1:
+        return "load"
+    return None
+
+
+def _pick_seed() -> Optional[str]:
+    """Show seed list with arrow keys. Returns content path or None."""
+    seeds = _find_seeds()
+    if not seeds:
+        return None
+    items = [f"《{s['title']}》" for s in seeds] + ["取消"]
+    idx = _menu_selector(items)
+    if idx is None or idx >= len(seeds):
+        return None
+    return seeds[idx]["path"]
 
 
 # ======================================================================
@@ -408,13 +571,16 @@ def _save_game(engine: GameEngine, path: str, quiet: bool = False) -> None:
     try:
         state = engine.export_state()
         state["conversation"] = engine.export_conversation()
+        state["save_time"] = datetime.datetime.now().isoformat()
+        state["model"] = engine.bot.model
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         if not quiet:
-            console.print(f"[dim]✓ 存档已保存至 {path}[/]")
+            slot_name = os.path.basename(path).replace(".json", "")
+            console.print(f"[dim]✓ 已保存 ({slot_name})[/]")
     except OSError as e:
         if not quiet:
-            console.print(f"[bold red]✗ 无法写入存档: {e}[/]")
+            console.print(f"[bold red]✗ 无法写入: {e}[/]")
 
 
 def _load_game(engine: GameEngine, path: str) -> None:
@@ -491,27 +657,27 @@ def main(argv: Optional[List[str]] = None) -> None:
         try:
             with open(args.seed, "r", encoding="utf-8") as f:
                 seed_content = f.read()
-            console.print(f"[dim]已加载种子: {args.seed}[/]")
         except (FileNotFoundError, OSError) as e:
             console.print(f"[bold red]无法读取种子文件: {e}[/]")
             sys.exit(1)
 
     if use_menu:
-        choice = _startup_menu()
-        if choice is None:
+        action = _startup_greeting()
+        if action is None:
             sys.exit(0)
-        if choice["action"] == "continue":
-            _load_game(engine, choice["path"])
-            _print_history(engine)
-        elif choice["action"] == "new":
-            if choice.get("seed"):
-                with open(choice["seed"], "r", encoding="utf-8") as f:
+        if action == "load":
+            if not _load_menu(engine):
+                # Load cancelled — start new game without seed
+                pass
+        elif action == "new":
+            seed_path = _pick_seed()
+            if seed_path:
+                with open(seed_path, "r", encoding="utf-8") as f:
                     seed_content = f.read()
-                console.print(f"[dim]已加载种子: {choice['seed']}[/]")
-        elif choice["action"] == "load_menu":
-            _show_load_menu(engine)
 
-    print_banner()
+    # ---- 游戏内操作提示 ----
+    if not args.seed and not getattr(args, "resume", False):
+        console.print("[dim]/save 存档 | /load 读档 | /delete 删档 | /quit 退出[/]")
 
     # ---- Interactive game loop ----
     first_round = True
@@ -537,24 +703,38 @@ def main(argv: Optional[List[str]] = None) -> None:
             console.print("[dim]游戏结束。感谢游玩！[/]")
             break
 
+        if player_input == "/save":
+            _save_menu(engine)
+            continue
+
         if player_input.startswith("/save "):
             arg = player_input[6:].strip()
+            if not arg:
+                continue
             if arg == "list":
-                _show_saves()
+                _show_save_slots()
             elif arg.isdigit():
                 _save_game(engine, _save_slot_path(arg))
             else:
                 _save_game(engine, arg)
             continue
 
+        if player_input == "/load":
+            _load_menu(engine)
+            continue
+
         if player_input.startswith("/load "):
             arg = player_input[6:].strip()
             if arg == "" or arg == "list":
-                _show_load_menu(engine)
+                _show_save_slots()
             elif arg.isdigit():
                 _load_game(engine, _save_slot_path(arg))
             else:
                 _load_game(engine, arg)
+            continue
+
+        if player_input == "/delete":
+            _delete_menu()
             continue
 
         if player_input == "":
