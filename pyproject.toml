@@ -28,10 +28,12 @@ dependencies = [
   "openai>=1.0.0",
   "rich>=13.0.0",
   "colorama>=0.4.6",
+  "textual>=0.41.0",
 ]
 
 [project.scripts]
 unframed = "unframed.cli:main"
+unframed-tui = "unframed.tui.app:main"
 
 [project.urls]
 Documentation = "https://github.com/zaf-x/unframed#readme"

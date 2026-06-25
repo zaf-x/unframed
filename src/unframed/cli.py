@@ -366,6 +366,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="显示工具调用等调试信息",
     )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="使用 Textual TUI 界面（实验性）",
+    )
     return parser
 
 
@@ -624,6 +629,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     """Main entry point for ``unframed``."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # ---- TUI mode ----
+    if getattr(args, "tui", False):
+        try:
+            from unframed.tui.app import main as tui_main
+            tui_main()
+        except ImportError as e:
+            console.print(f"[bold red]TUI 不可用: {e}[/]")
+            console.print("请安装 textual: pip install textual")
+            sys.exit(1)
+        sys.exit(0)
 
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
     if not api_key:
