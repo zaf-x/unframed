@@ -367,7 +367,13 @@ class GameScreen(Screen):
     def _restore_history(self, engine: GameEngine) -> None:
         log = self.query_one("#narrative", RichLog)
         for msg in engine.export_conversation():
-            if msg.get("role") == "assistant" and msg.get("content"):
+            if msg.get("role") == "user" and msg.get("content"):
+                # Extract player text from the prompt
+                content = msg["content"]
+                if "玩家说：" in content:
+                    player_said = content.split("玩家说：\"", 1)[1].rsplit("\"", 1)[0]
+                    log.write(f"\n[bold green]> {player_said}[/]\n\n")
+            elif msg.get("role") == "assistant" and msg.get("content"):
                 log.write(Markdown(msg["content"]))
 
     def _update_state_panel(self) -> None:
