@@ -87,6 +87,7 @@ class _GameState:
         self.engine: GameEngine | None = None
         self.seed_content: str = ""
         self.initialized: bool = False
+        self.active_slot: str | None = None
 
 
 # ======================================================================
@@ -488,10 +489,11 @@ class GameScreen(Screen):
 
     def _auto_save(self) -> None:
         try:
+            slot = self.app.game_state.active_slot or "auto"
+            path = _save_slot_path(slot)
             state = self._engine.export_state()
             state["conversation"] = self._engine.export_conversation()
             state["save_time"] = datetime.datetime.now().isoformat()
-            path = _save_slot_path("auto")
             os.makedirs(SAVES_DIR, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
@@ -599,6 +601,7 @@ class SlotPickerScreen(Screen):
                     with open(path, "w", encoding="utf-8") as f:
                         json.dump(state, f, ensure_ascii=False, indent=2)
                     self.app.notify(f"已保存到槽位 {slot}")
+                    self.app.game_state.active_slot = slot
                 except OSError as e:
                     self.app.notify(f"保存失败: {e}", severity="error")
 
@@ -680,6 +683,7 @@ class UnframedApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.game_state = _GameState()
+        self.game_state.active_slot = None
 
     def on_ready(self) -> None:
         self.push_screen(StartupScreen())
