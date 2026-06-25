@@ -301,6 +301,11 @@ class GameScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
+        """Defer engine setup until after mount completes."""
+        self.set_timer(0.05, self._setup_engine)
+
+    def _setup_engine(self) -> None:
+        """Initialize engine and restore state."""
         gs: _GameState = self.app.game_state
 
         # Create engine if not loaded from save
