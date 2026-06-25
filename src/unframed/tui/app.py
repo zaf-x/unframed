@@ -291,7 +291,7 @@ class GameScreen(Screen):
         dock: bottom;
         height: 1;
         content-align: center middle;
-        color: $text-dim;
+        color: $text-disabled;
         display: none;
     }
     #status-text.-visible {
