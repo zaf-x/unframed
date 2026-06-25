@@ -379,19 +379,13 @@ class GameScreen(Screen):
         engine = self._engine
         lines: List[str] = []
 
-        lines.append("[bold cyan]核心区[/]")
+        lines.append("[bold cyan]核心设定[/]")
         pinned = [(n, e) for n, e in engine.vars_db.items() if e.pinned]
         if pinned:
             for name, entry in pinned:
                 lines.append(f"  {name}: {entry.value}")
         else:
             lines.append("  [dim]（空）[/]")
-
-        if engine.plot_root:
-            lines.append("")
-            lines.append("[bold cyan]剧情树[/]")
-            if engine.plot_current:
-                lines.append(f"  ▶ {engine.plot_current.name}")
 
         lines.append("")
         lines.append(f"[dim]回合 {engine.round_num}[/]")
