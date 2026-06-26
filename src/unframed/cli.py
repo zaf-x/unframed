@@ -101,11 +101,36 @@ def _find_seeds() -> List[dict]:
 # 存档管理
 # ======================================================================
 
-MAX_SLOTS = 10
+import uuid as uuid_mod
 
-def _save_slot_path(slot: str) -> str:
+
+def _new_save_id() -> str:
+    return uuid_mod.uuid4().hex
+
+
+def _save_path(uuid_str: str) -> str:
     os.makedirs(SAVES_DIR, exist_ok=True)
-    return os.path.join(SAVES_DIR, f"slot_{slot}.json")
+    return os.path.join(SAVES_DIR, f"{uuid_str}.json")
+
+
+def _read_last_played() -> Optional[str]:
+    path = os.path.join(SAVES_DIR, ".last_played")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_last_played(uuid_str: str) -> None:
+    os.makedirs(SAVES_DIR, exist_ok=True)
+    try:
+        with open(os.path.join(SAVES_DIR, ".last_played"), "w", encoding="utf-8") as f:
+            f.write(uuid_str)
+    except OSError:
+        pass
 
 
 def _save_meta(path: str) -> Optional[dict]:
@@ -116,6 +141,8 @@ def _save_meta(path: str) -> Optional[dict]:
     except (json.JSONDecodeError, OSError):
         return None
     return {
+        "uuid": data.get("uuid", ""),
+        "name": data.get("name", ""),
         "round": data.get("round", "?"),
         "time": data.get("save_time", ""),
         "model": data.get("model", ""),
@@ -126,13 +153,13 @@ def _list_saves() -> List[dict]:
     if not os.path.isdir(SAVES_DIR):
         return []
     saves = []
-    for f in sorted(os.listdir(SAVES_DIR)):
-        if f.startswith("slot_") and f.endswith(".json"):
-            slot = f.replace("slot_", "").replace(".json", "")
-            path = os.path.join(SAVES_DIR, f)
+    for fname in sorted(os.listdir(SAVES_DIR)):
+        if fname.endswith(".json") and not fname.startswith("."):
+            path = os.path.join(SAVES_DIR, fname)
             meta = _save_meta(path)
             if meta:
-                saves.append({"slot": slot, "path": path, **meta})
+                saves.append({"file": path, **meta})
+    saves.sort(key=lambda s: s.get("time") or "", reverse=True)
     return saves
 
 
@@ -148,23 +175,21 @@ def _format_time(ts: str) -> str:
 
 
 def _show_save_slots(highlight: Optional[str] = None) -> None:
-    """Display save slots 1-10 with existing save info."""
-    saves = {s["slot"]: s for s in _list_saves()}
+    """Display all saves with name and round info."""
+    saves = _list_saves()
     console.print()
-    console.print("[bold]存档槽位：[/]")
-    for i in range(1, MAX_SLOTS + 1):
-        si = str(i)
-        if si in saves:
-            s = saves[si]
-            info = f"第 {s['round']} 轮"
+    console.print("[bold]存档列表：[/]")
+    if not saves:
+        console.print("  [dim]（暂无存档）[/]")
+    else:
+        for s in saves:
+            name = s.get("name") or s.get("uuid", "?")
+            info = f"《{name}》 — 第 {s['round']} 轮"
             if s.get("time"):
                 info += f"  {_format_time(s['time'])}"
-            marker = " [bold green]◀[/]" if si == highlight else ""
-            console.print(f"  [bold]{i}[/]  {info}{marker}")
-        else:
-            marker = " [bold green]◀[/]" if si == highlight else ""
-            console.print(f"  [bold]{i}[/]  [dim]空[/]{marker}")
-    console.print(f"  [bold]q[/]  取消")
+            marker = " [bold green]◀[/]" if s.get("uuid") == highlight else ""
+            console.print(f"  [bold]{info}[/]{marker}")
+    console.print("  [bold]q[/]  取消")
 
 
 def _confirm(msg: str) -> bool:
@@ -184,22 +209,52 @@ def _save_menu(engine: GameEngine) -> None:
     """Interactive save menu."""
     _show_save_slots()
     console.print()
+    console.print("[dim]输入存档名称（新建或覆盖）或 q 取消[/]")
 
     while True:
-        pick = input("\033[1;32m存到哪个槽位？\033[0m ").strip()
+        pick = input("\033[1;32m> \033[0m").strip()
         if pick == "q":
             return
-        if pick.isdigit():
-            n = int(pick)
-            if n < 1 or n > MAX_SLOTS:
-                console.print(f"[red]槽位 1-{MAX_SLOTS}[/]")
-                continue
-            path = _save_slot_path(pick)
-            if os.path.exists(path) and not _confirm("该槽位已有存档，覆盖？"):
+        if not pick:
+            console.print("[red]请输入存档名称[/]")
+            continue
+        saves = _list_saves()
+        existing = None
+        for s in saves:
+            if s.get("name", "") == pick:
+                existing = s
+                break
+        if existing:
+            if not _confirm(f"《{pick}》已存在，覆盖？"):
                 return
-            _save_game(engine, path)
+            _save_game(engine, existing["file"])
+            _update_save_meta(existing["file"], uuid_str=existing["uuid"], name=pick)
+            _write_last_played(existing["uuid"])
             return
-        console.print("[red]无效[/]")
+        # New save
+        uuid_str = _new_save_id()
+        path = _save_path(uuid_str)
+        _save_game(engine, path)
+        _update_save_meta(path, uuid_str=uuid_str, name=pick)
+        _write_last_played(uuid_str)
+        console.print(f"[dim]✓ 已创建新存档《{pick}》[/]")
+        return
+
+
+def _update_save_meta(path: str, uuid_str: str, name: str) -> None:
+    """Update uuid and name fields in an existing save file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+    state["uuid"] = uuid_str
+    state["name"] = name
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 def _load_menu(engine: GameEngine) -> bool:
@@ -213,17 +268,19 @@ def _load_menu(engine: GameEngine) -> bool:
     console.print()
 
     while True:
-        pick = input("\033[1;32m读哪个槽位？\033[0m ").strip()
+        pick = input("\033[1;32m读哪个存档？\033[0m ").strip()
         if pick == "q":
             return False
-        if pick.isdigit():
-            path = _save_slot_path(pick)
-            if not os.path.exists(path):
-                console.print("[red]该槽位为空[/]")
-                continue
-            _load_game(engine, path)
+        matched = None
+        for s in saves:
+            if s.get("name", "") == pick or s.get("uuid", "") == pick:
+                matched = s
+                break
+        if matched:
+            _load_game(engine, matched["file"])
+            _write_last_played(matched["uuid"])
             return True
-        console.print("[red]无效[/]")
+        console.print("[red]未找到匹配的存档名[/]")
 
 
 def _delete_menu() -> None:
@@ -237,18 +294,22 @@ def _delete_menu() -> None:
     console.print()
 
     while True:
-        pick = input("\033[1;32m删除哪个槽位？\033[0m ").strip()
+        pick = input("\033[1;32m删除哪个存档？\033[0m ").strip()
         if pick == "q":
             return
-        if pick.isdigit():
-            path = _save_slot_path(pick)
-            if not os.path.exists(path):
-                console.print("[red]该槽位为空[/]")
-                continue
-            if _confirm(f"确定删除槽位 {pick}？"):
-                os.remove(path)
-                console.print(f"[dim]已删除槽位 {pick}[/]")
+        matched = None
+        for s in saves:
+            if s.get("name", "") == pick or s.get("uuid", "") == pick:
+                matched = s
+                break
+        if matched:
+            if _confirm(f"确认删除《{matched.get('name', pick)}》？"):
+                os.remove(matched["file"])
+                console.print(f"[dim]✓ 已删除《{matched.get('name', pick)}》[/]")
             return
+        console.print("[red]未找到匹配的存档名[/]")
+        if pick.isdigit():
+            console.print("[red]请使用存档名称来删除（如：/delete 我的存档）[/]")
         console.print("[red]无效[/]")
 
 
@@ -507,19 +568,45 @@ def _show_help() -> None:
 
 
 def _startup_greeting() -> Optional[str]:
-    """Show banner + arrow-key menu. Returns 'new' or 'load', or None to quit."""
+    """Show banner + arrow-key menu. Returns 'new', 'load', 'continue', 'help', or None to quit."""
     print_banner()
-    idx = _menu_selector(["新游戏", "加载存档", "帮助文档", "退出"])
+    items = ["新建存档"]
+    if _read_last_played():
+        items.append("继续上一个存档")
+    items += ["加载存档", "帮助文档", "退出"]
+    idx = _menu_selector(items)
     if idx is None:
         return None
-    if idx == 0:
-        return "new"
-    if idx == 1:
-        return "load"
-    if idx == 2:
+    has_continue = bool(_read_last_played())
+    if has_continue:
+        actions = ["new", "continue", "load", "help", None]
+    else:
+        actions = ["new", "load", "help", None]
+    action = actions[idx] if idx < len(actions) else None
+    if action == "help":
         _show_help()
+    return action
+    if action == "new":
+        console.print()
+        name = input("\033[1;32m存档名称：\033[0m ").strip()
+        if not name:
+            console.print("[dim]取消[/]")
+            return None
+        uuid_str = _new_save_id()
+        _engine_save_uuid = uuid_str
+        _engine_save_name = name
+        seed_path = _pick_seed()
+        if seed_path:
+            engine._save_uuid = uuid_str
+            engine._save_name = name
+            with open(seed_path, "r", encoding="utf-8") as f:
+                seed_content = f.read()
+            _save_game(engine, _save_path(uuid_str))
+            _update_save_meta(_save_path(uuid_str), uuid_str=uuid_str, name=name)
+            _write_last_played(uuid_str)
+            return "new"
         return None
-    return None
+    return action
 
 
 def _pick_seed() -> Optional[str]:
@@ -743,7 +830,20 @@ def main(argv: Optional[List[str]] = None) -> None:
         action = _startup_greeting()
         if action is None:
             sys.exit(0)
-        if action == "load":
+
+        if action == "continue":
+            uuid_str = _read_last_played()
+            if uuid_str:
+                path = _save_path(uuid_str)
+                if os.path.exists(path):
+                    _load_game(engine, path)
+                    _print_history(engine)
+                    use_menu = False
+                else:
+                    console.print("[dim]最近存档不可用，开始新游戏[/]")
+            else:
+                console.print("[dim]最近存档不可用，开始新游戏[/]")
+        elif action == "load":
             if not _load_menu(engine):
                 # Load cancelled — start new game without seed
                 pass
@@ -791,10 +891,22 @@ def main(argv: Optional[List[str]] = None) -> None:
                 continue
             if arg == "list":
                 _show_save_slots()
-            elif arg.isdigit():
-                _save_game(engine, _save_slot_path(arg))
             else:
-                _save_game(engine, arg)
+                saves = _list_saves()
+                matched = None
+                for s in saves:
+                    if s.get("name", "") == arg or s.get("uuid", "") == arg:
+                        matched = s
+                        break
+                if matched:
+                    _save_game(engine, matched["file"])
+                    _write_last_played(matched["uuid"])
+                else:
+                    uuid_str = _new_save_id()
+                    path = _save_path(uuid_str)
+                    _save_game(engine, path)
+                    _update_save_meta(path, uuid_str=uuid_str, name=arg)
+                    _write_last_played(uuid_str)
             continue
 
         if player_input == "/load":
@@ -805,10 +917,18 @@ def main(argv: Optional[List[str]] = None) -> None:
             arg = player_input[6:].strip()
             if arg == "" or arg == "list":
                 _show_save_slots()
-            elif arg.isdigit():
-                _load_game(engine, _save_slot_path(arg))
             else:
-                _load_game(engine, arg)
+                saves = _list_saves()
+                matched = None
+                for s in saves:
+                    if s.get("name", "") == arg or s.get("uuid", "") == arg:
+                        matched = s
+                        break
+                if matched:
+                    _load_game(engine, matched["file"])
+                    _write_last_played(matched["uuid"])
+                else:
+                    console.print("[red]未找到匹配的存档名[/]")
             continue
 
         if player_input == "/delete":

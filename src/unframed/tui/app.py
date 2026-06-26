@@ -7,6 +7,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import uuid
 from typing import List
 
 from textual import work
@@ -39,9 +40,71 @@ SAVES_DIR = os.path.expanduser("~/.unframed_saves")
 SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "seeds"))
 
 
-def _save_slot_path(slot: str) -> str:
+def _new_save_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _save_path(uuid_str: str) -> str:
     os.makedirs(SAVES_DIR, exist_ok=True)
-    return os.path.join(SAVES_DIR, f"slot_{slot}.json")
+    return os.path.join(SAVES_DIR, f"{uuid_str}.json")
+
+
+def _last_played_path() -> str:
+    return os.path.join(SAVES_DIR, ".last_played")
+
+
+def _read_last_played() -> str | None:
+    """Read the last-played save UUID. Returns None if not found."""
+    path = _last_played_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_last_played(uuid_str: str) -> None:
+    """Record this save as the most recently played."""
+    os.makedirs(SAVES_DIR, exist_ok=True)
+    try:
+        with open(_last_played_path(), "w", encoding="utf-8") as f:
+            f.write(uuid_str)
+    except OSError:
+        pass
+
+
+def _list_saves() -> list[dict]:
+    """Scan SAVES_DIR for all save files. Returns sorted list of metadata dicts."""
+    if not os.path.isdir(SAVES_DIR):
+        return []
+    saves = []
+    for fname in os.listdir(SAVES_DIR):
+        if fname.endswith(".json") and not fname.startswith("."):
+            path = os.path.join(SAVES_DIR, fname)
+            uuid_str = fname[:-5]  # strip .json
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                saves.append({
+                    "uuid": data.get("uuid", uuid_str),
+                    "name": data.get("name", uuid_str),
+                    "round": data.get("round", "?"),
+                    "save_time": data.get("save_time", ""),
+                    "file": path,
+                })
+            except (json.JSONDecodeError, OSError):
+                saves.append({
+                    "uuid": uuid_str,
+                    "name": f"[损坏] {uuid_str}",
+                    "round": "?",
+                    "save_time": "",
+                    "file": path,
+                    "corrupted": True,
+                })
+    saves.sort(key=lambda s: s.get("save_time", "") or "", reverse=True)
+    return saves
 
 
 # ======================================================================
@@ -101,8 +164,40 @@ class _GameState:
         self.engine: GameEngine | None = None
         self.seed_content: str = ""
         self.initialized: bool = False
-        self.active_slot: str | None = None
-        self.active_slot: str | None = None
+        self.active_save_uuid: str | None = None
+        self.active_save_name: str | None = None
+
+
+# ======================================================================
+# New Save Screen
+# ======================================================================
+
+
+class NewSaveScreen(Screen):
+    """Create a new named save, then pick a seed."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("\n")
+        yield Label("[bold]新建存档[/]", classes="prompt")
+        yield Input(placeholder="输入存档名称...", id="save-name")
+        yield Button("下一步：选择种子", id="next")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "next":
+            self._proceed()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._proceed()
+
+    def _proceed(self) -> None:
+        name = self.query_one("#save-name", Input).value.strip()
+        if not name:
+            self.app.notify("请输入存档名称", severity="warning")
+            return
+        gs: _GameState = self.app.game_state
+        gs.active_save_uuid = _new_save_id()
+        gs.active_save_name = name
+        self.app.push_screen(SeedPickerScreen())
 
 
 # ======================================================================
@@ -117,27 +212,70 @@ class StartupScreen(Screen):
         yield Static("\n\n\n", classes="spacer")
         yield Static("[bold cyan]U N F R A M E D[/]", id="title")
         yield Static("AI 自举叙事游戏 · 无预设框架\n", classes="subtitle")
-        yield ListView(
-            ListItem(Label("[bold]新游戏[/]")),
-            ListItem(Label("加载存档")),
-            ListItem(Label("设置")),
-            ListItem(Label("文档")),
-            ListItem(Label("退出")),
-            id="menu",
-        )
+        items = [
+            ListItem(Label("[bold]新建存档[/]")),
+        ]
+        if _read_last_played():
+            items.append(ListItem(Label("[bold]继续上一个存档[/]")))
+        items.append(ListItem(Label("加载存档")))
+        items.append(ListItem(Label("设置")))
+        items.append(ListItem(Label("文档")))
+        items.append(ListItem(Label("退出")))
+        yield ListView(*items, id="menu")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
         if idx == 0:
-            self.app.push_screen(SeedPickerScreen())
-        elif idx == 1:
-            self.app.push_screen(LoadScreen())
-        elif idx == 2:
-            self.app.push_screen(SettingsScreen())
-        elif idx == 3:
-            self.app.push_screen(HelpScreen())
-        elif idx == 4:
-            self.app.exit()
+            self.app.push_screen(NewSaveScreen())
+        else:
+            # Shift index if "继续上一个存档" is present
+            has_continue = bool(_read_last_played())
+            offset = 1 if has_continue else 0
+            if has_continue and idx == 1:
+                # Continue last save
+                gs: _GameState = self.app.game_state
+                uuid_str = _read_last_played()
+                if uuid_str:
+                    path = _save_path(uuid_str)
+                    if os.path.exists(path):
+                        gs.engine = GameEngine(
+                            api_key=gs.api_key,
+                            base_url=gs.base_url,
+                            model=gs.model,
+                            temperature=gs.temperature,
+                        )
+                        try:
+                            with open(path, encoding="utf-8") as f:
+                                state = json.load(f)
+                            gs.engine.import_state(state)
+                            conv = state.get("conversation", [])
+                            if conv:
+                                gs.engine.import_conversation(conv)
+                            gs.initialized = True
+                            gs.active_save_uuid = uuid_str
+                            gs.active_save_name = state.get("name", uuid_str)
+                            self.app.push_screen(GameScreen())
+                            return
+                        except (json.JSONDecodeError, OSError) as e:
+                            self.app.notify(f"读档失败: {e}", severity="error")
+                            return
+            # Map remaining indices
+            def _map(idx: int) -> int:
+                if not has_continue:
+                    return idx
+                # 0=new, 1=continue, 2=load, 3=settings, 4=docs, 5=quit
+                # We already handled idx=0 and idx=1 above
+                # For remaining, subtract 1 to skip "continue"
+                return idx - 1
+            remap = _map(idx)
+            if remap == 1:  # load (index without continue)
+                self.app.push_screen(LoadScreen())
+            elif remap == 2:  # settings
+                self.app.push_screen(SettingsScreen())
+            elif remap == 3:  # docs
+                self.app.push_screen(HelpScreen())
+            elif remap == 4:  # quit
+                self.app.exit()
 
 
 # ======================================================================
@@ -257,53 +395,50 @@ class SeedPickerScreen(Screen):
 
 
 class LoadScreen(Screen):
-    """Save slot selection."""
+    """Load a named save."""
 
     def compose(self) -> ComposeResult:
         yield Static("\n")
         yield Label("选择存档：", classes="prompt")
-        items = []
-        if os.path.isdir(SAVES_DIR):
-            for f in sorted(os.listdir(SAVES_DIR)):
-                if f.startswith("slot_") and f.endswith(".json"):
-                    slot = f.replace("slot_", "").replace(".json", "")
-                    try:
-                        with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
-                            meta = json.load(fh)
-                        info = f"槽位 {slot} — 第 {meta.get('round', '?')} 轮"
-                        if meta.get("save_time"):
-                            info += f"  [{_format_time(meta['save_time'])}]"
-                        items.append((os.path.join(SAVES_DIR, f), info))
-                    except (json.JSONDecodeError, OSError):
-                        items.append((os.path.join(SAVES_DIR, f), f"槽位 {slot} — [dim]损坏[/]"))
-        if not items:
+        saves = _list_saves()
+        if not saves:
             yield Label("[dim]暂无存档[/]")
             yield Button("返回", id="back")
         else:
-            lv_items = [ListItem(Label(info)) for _, info in items]
-            lv_items.append(ListItem(Label("[dim]取消[/]")))
-            yield ListView(*lv_items, id="load_list")
+            items = []
+            for s in saves:
+                name = s.get("name", s["uuid"])
+                info = f"《{name}》 — 第 {s['round']} 轮"
+                if s.get("save_time"):
+                    info += f"  [{_format_time(s['save_time'])}]"
+                if s.get("corrupted"):
+                    info += "  [dim]损坏[/]"
+                items.append(ListItem(Label(info)))
+            items.append(ListItem(Label("[dim]取消[/]")))
+            yield ListView(*items, id="load_list")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
+        saves = _list_saves()
         idx = event.list_view.index
-        items = []
-        if os.path.isdir(SAVES_DIR):
-            for f in sorted(os.listdir(SAVES_DIR)):
-                if f.startswith("slot_") and f.endswith(".json"):
-                    items.append(os.path.join(SAVES_DIR, f))
-        if idx < len(items):
+        if idx < len(saves):
+            s = saves[idx]
+            if s.get("corrupted"):
+                self.app.notify("该存档已损坏", severity="error")
+                return
             gs: _GameState = self.app.game_state
             gs.engine = GameEngine(
                 api_key=gs.api_key, base_url=gs.base_url, model=gs.model, temperature=gs.temperature
             )
             try:
-                with open(items[idx], encoding="utf-8") as f:
+                with open(s["file"], encoding="utf-8") as f:
                     state = json.load(f)
                 gs.engine.import_state(state)
                 conv = state.get("conversation", [])
                 if conv:
                     gs.engine.import_conversation(conv)
                 gs.initialized = True
+                gs.active_save_uuid = state.get("uuid", s["uuid"])
+                gs.active_save_name = state.get("name", s["name"])
                 self.app.push_screen(GameScreen())
             except (json.JSONDecodeError, OSError) as e:
                 self.app.notify(f"读档失败: {e}", severity="error")
@@ -561,14 +696,20 @@ class GameScreen(Screen):
 
     def _auto_save(self) -> None:
         try:
-            slot = self.app.game_state.active_slot or "auto"
-            path = _save_slot_path(slot)
+            gs = self.app.game_state
+            uuid_str = gs.active_save_uuid
+            if not uuid_str:
+                return
+            path = _save_path(uuid_str)
             state = self._engine.export_state()
+            state["uuid"] = uuid_str
+            state["name"] = gs.active_save_name or "未命名"
             state["conversation"] = self._engine.export_conversation()
             state["save_time"] = datetime.datetime.now().isoformat()
             os.makedirs(SAVES_DIR, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
+            _write_last_played(uuid_str)
         except OSError as e:
             self.app.notify(f"自动存档失败: {e}", severity="warning")
 
@@ -595,7 +736,7 @@ class GameScreen(Screen):
 
 
 class SaveManagerScreen(Screen):
-    """Unified save slot manager: Enter=save, Delete=delete, R=rename."""
+    """Unlimited save manager: Enter=save, Delete=delete, R=rename, new save button."""
 
     BINDINGS = [
         ("delete", "delete_slot", "删除"),
@@ -622,91 +763,92 @@ class SaveManagerScreen(Screen):
     def __init__(self, engine: GameEngine) -> None:
         super().__init__()
         self._engine = engine
-        self._selectable_slots: list[str] = []
-        self._slot_infos: dict[str, str] = {}
+        self._selectable: list[dict] = []
 
     def compose(self) -> ComposeResult:
         yield Static("[bold]存档管理[/]", id="dialog-title")
 
-        self._selectable_slots.clear()
-        self._slot_infos.clear()
-        items: list[tuple[str, str]] = []
+        self._selectable = _list_saves()
 
-        if os.path.isdir(SAVES_DIR):
-            for f in sorted(os.listdir(SAVES_DIR)):
-                if f.startswith("slot_") and f.endswith(".json"):
-                    slot = f.replace("slot_", "").replace(".json", "")
-                    self._selectable_slots.append(slot)
-                    try:
-                        with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
-                            meta = json.load(fh)
-                        name = meta.get("slot_name", "")
-                        label = f"《{name}》" if name else f"槽位 {slot}"
-                        info = f"{label} — 第 {meta.get('round', '?')} 轮"
-                        if meta.get("save_time"):
-                            info += f"  [{_format_time(meta['save_time'])}]"
-                        self._slot_infos[slot] = info
-                        items.append((slot, info))
-                    except (json.JSONDecodeError, OSError):
-                        items.append((slot, f"槽位 {slot} — [dim]损坏[/]"))
+        lv_items = []
+        current_uuid = self.app.game_state.active_save_uuid
+        for s in self._selectable:
+            name = s.get("name", s["uuid"])
+            info = f"《{name}》 — 第 {s['round']} 轮"
+            if s.get("save_time"):
+                info += f"  [{_format_time(s['save_time'])}]"
+            if s["uuid"] == current_uuid:
+                info += "  [bold cyan]◀[/]"
+            if s.get("corrupted"):
+                info += "  [dim]损坏[/]"
+            lv_items.append(ListItem(Label(info)))
 
-        existing = {s for s, _ in items}
-        for i in range(1, 6):
-            si = str(i)
-            if si not in existing:
-                items.append((si, f"槽位 {si} — [dim]空[/]"))
-                if si not in self._selectable_slots:
-                    self._selectable_slots.append(si)
-        items.sort(key=lambda x: (x[0].isdigit(), int(x[0]) if x[0].isdigit() else x[0]))
-        self._selectable_slots.sort(key=lambda x: (x.isdigit(), int(x) if x.isdigit() else x))
-
-        lv_items = [ListItem(Label(info)) for _, info in items]
+        # Empty slot entry for "new save" — always show at top
+        lv_items.insert(0, ListItem(Label("[bold]新建存档...[/]")))
         lv_items.append(ListItem(Label("[dim]取消[/]")))
         yield ListView(*lv_items, id="slot-list")
         yield Static("[dim]Enter 保存  |  Delete 删除  |  R 重命名  |  q 关闭[/]", classes="hint")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
-        if idx < len(self._selectable_slots):
-            self._save_to(idx)
+        # idx 0 is "新建存档", skip it by using idx-1 into _selectable
+        if idx == 0:
+            # New save
+            self.app.push_screen(NewSaveScreen())
+            return
+        save_idx = idx - 1
+        if save_idx < len(self._selectable):
+            s = self._selectable[save_idx]
+            if s.get("corrupted"):
+                self.app.notify("该存档已损坏，无法保存", severity="error")
+                return
+            self._save_to(s)
         self.app.pop_screen()
 
     def action_delete_slot(self) -> None:
         lv = self.query_one("#slot-list", ListView)
         idx = lv.index
-        if idx is None or idx >= len(self._selectable_slots):
+        if idx is None or idx <= 0:
             return
-        slot = self._selectable_slots[idx]
-        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+        save_idx = idx - 1
+        if save_idx >= len(self._selectable):
+            return
+        s = self._selectable[save_idx]
+        path = s["file"]
         if os.path.exists(path):
             os.remove(path)
-            self.app.notify(f"已删除槽位 {slot}")
+            self.app.notify(f"已删除《{s.get('name', '未命名')}》")
             self._refresh()
 
     def action_rename_slot(self) -> None:
         lv = self.query_one("#slot-list", ListView)
         idx = lv.index
-        if idx is None or idx >= len(self._selectable_slots):
+        if idx is None or idx <= 0:
             return
-        slot = self._selectable_slots[idx]
-        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
-        if not os.path.exists(path):
-            self.app.notify("该槽位为空，先保存再重命名", severity="warning")
+        save_idx = idx - 1
+        if save_idx >= len(self._selectable):
             return
-        self.app.push_screen(RenameScreen(slot, path))
+        s = self._selectable[save_idx]
+        if s.get("corrupted"):
+            self.app.notify("该存档已损坏，无法重命名", severity="warning")
+            return
+        self.app.push_screen(RenameScreen(s["uuid"], s["file"]))
 
-    def _save_to(self, idx: int) -> None:
-        slot = self._selectable_slots[idx]
-        path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
+    def _save_to(self, save_info: dict) -> None:
+        path = save_info["file"]
         os.makedirs(SAVES_DIR, exist_ok=True)
         state = self._engine.export_state()
+        state["uuid"] = save_info["uuid"]
+        state["name"] = save_info.get("name", "未命名")
         state["conversation"] = self._engine.export_conversation()
         state["save_time"] = datetime.datetime.now().isoformat()
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-            self.app.notify(f"已保存到槽位 {slot}")
-            self.app.game_state.active_slot = slot
+            self.app.notify(f"已保存到《{save_info.get('name', '未命名')}》")
+            gs = self.app.game_state
+            gs.active_save_uuid = save_info["uuid"]
+            gs.active_save_name = save_info.get("name")
         except OSError as e:
             self.app.notify(f"保存失败: {e}", severity="error")
 
@@ -731,19 +873,19 @@ class RenameScreen(Screen):
     }
     """
 
-    def __init__(self, slot: str, path: str) -> None:
+    def __init__(self, uuid_str: str, path: str) -> None:
         super().__init__()
-        self._slot = slot
+        self._uuid = uuid_str
         self._path = path
 
     def compose(self) -> ComposeResult:
         try:
             with open(self._path, encoding="utf-8") as f:
                 meta = json.load(f)
-            current = meta.get("slot_name", "")
+            current = meta.get("name", "")
         except (json.JSONDecodeError, OSError):
             current = ""
-        yield Static(f"[bold]重命名槽位 {self._slot}[/]")
+        yield Static(f"[bold]重命名存档[/]")
         yield Input(value=current, placeholder="输入新名称...", id="rename-input")
         yield Button("确认", id="confirm")
 
@@ -759,9 +901,9 @@ class RenameScreen(Screen):
             with open(self._path, encoding="utf-8") as f:
                 state = json.load(f)
             if name:
-                state["slot_name"] = name
+                state["name"] = name
             else:
-                state.pop("slot_name", None)
+                state.pop("name", None)
             with open(self._path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
             self.app.notify(f"已重命名为《{name}》" if name else "已清除名称")
@@ -776,7 +918,7 @@ class RenameScreen(Screen):
 
 
 class SlotPickerScreen(Screen):
-    """Modal overlay for selecting a save slot."""
+    """Modal overlay for load/delete via menu (Ctrl+L / Ctrl+D)."""
 
     CSS = """
     SlotPickerScreen {
@@ -797,41 +939,21 @@ class SlotPickerScreen(Screen):
         self._engine = engine
 
     def compose(self) -> ComposeResult:
-        labels = {"save": "存档", "load": "读档", "delete": "删档"}
+        labels = {"load": "读档", "delete": "删档"}
         title = labels.get(self._mode, "操作")
         yield Static(f"[bold]{title}[/]", id="dialog-title")
 
-        self._selectable_slots: list[str] = []
-        items: list[tuple[str, str]] = []
-        if os.path.isdir(SAVES_DIR):
-            for f in sorted(os.listdir(SAVES_DIR)):
-                if f.startswith("slot_") and f.endswith(".json"):
-                    slot = f.replace("slot_", "").replace(".json", "")
-                    self._selectable_slots.append(slot)
-                    try:
-                        with open(os.path.join(SAVES_DIR, f), encoding="utf-8") as fh:
-                            meta = json.load(fh)
-                        info = f"槽位 {slot} — 第 {meta.get('round', '?')} 轮"
-                        if meta.get("save_time"):
-                            info += f"  [{_format_time(meta['save_time'])}]"
-                        items.append((slot, info))
-                    except (json.JSONDecodeError, OSError):
-                        items.append((slot, f"槽位 {slot} — [dim]损坏[/]"))
-
-        # Always show empty slots up to 5 for saving
-        if self._mode == "save":
-            existing = {s for s, _ in items}
-            for i in range(1, 6):
-                si = str(i)
-                if si not in existing:
-                    items.append((si, f"槽位 {si} — [dim]空[/]"))
-                    if si not in self._selectable_slots:
-                        self._selectable_slots.append(si)
-            items.sort(key=lambda x: (x[0].isdigit(), int(x[0]) if x[0].isdigit() else x[0]))
-            self._selectable_slots.sort(key=lambda x: (x.isdigit(), int(x) if x.isdigit() else x))
-
-        if items:
-            lv_items = [ListItem(Label(info)) for _, info in items]
+        self._saves = _list_saves()
+        if self._saves:
+            lv_items = []
+            for s in self._saves:
+                name = s.get("name", s["uuid"])
+                info = f"《{name}》 — 第 {s['round']} 轮"
+                if s.get("save_time"):
+                    info += f"  [{_format_time(s['save_time'])}]"
+                if s.get("corrupted"):
+                    info += "  [dim]损坏[/]"
+                lv_items.append(ListItem(Label(info)))
             lv_items.append(ListItem(Label("[dim]取消[/]")))
             yield ListView(*lv_items, id="slot-list")
         else:
@@ -840,27 +962,15 @@ class SlotPickerScreen(Screen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
+        if idx < len(self._saves):
+            s = self._saves[idx]
 
-        if idx < len(self._selectable_slots):
-            slot = self._selectable_slots[idx]
-            path = os.path.join(SAVES_DIR, f"slot_{slot}.json")
-
-            if self._mode == "save":
-                os.makedirs(SAVES_DIR, exist_ok=True)
-                state = self._engine.export_state()
-                state["conversation"] = self._engine.export_conversation()
-                state["save_time"] = datetime.datetime.now().isoformat()
+            if self._mode == "load":
+                if s.get("corrupted"):
+                    self.app.notify("该存档已损坏", severity="error")
+                    return
                 try:
-                    with open(path, "w", encoding="utf-8") as f:
-                        json.dump(state, f, ensure_ascii=False, indent=2)
-                    self.app.notify(f"已保存到槽位 {slot}")
-                    self.app.game_state.active_slot = slot
-                except OSError as e:
-                    self.app.notify(f"保存失败: {e}", severity="error")
-
-            elif self._mode == "load":
-                try:
-                    with open(path, encoding="utf-8") as f:
+                    with open(s["file"], encoding="utf-8") as f:
                         state = json.load(f)
                     gs = self.app.game_state
                     gs.engine = GameEngine(
@@ -874,6 +984,8 @@ class SlotPickerScreen(Screen):
                     if conv:
                         gs.engine.import_conversation(conv)
                     gs.initialized = True
+                    gs.active_save_uuid = state.get("uuid", s["uuid"])
+                    gs.active_save_name = state.get("name", s["name"])
                     self.app.pop_screen()  # SlotPickerScreen
                     self.app.pop_screen()  # GameScreen
                     self.app.push_screen(GameScreen())
@@ -882,8 +994,8 @@ class SlotPickerScreen(Screen):
 
             elif self._mode == "delete":
                 try:
-                    os.remove(path)
-                    self.app.notify(f"已删除槽位 {slot}")
+                    os.remove(s["file"])
+                    self.app.notify(f"已删除《{s.get('name', '未命名')}》")
                 except OSError as e:
                     self.app.notify(f"删除失败: {e}", severity="error")
 
@@ -939,7 +1051,6 @@ class UnframedApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.game_state = _GameState()
-        self.game_state.active_slot = None
 
     def on_ready(self) -> None:
         self.push_screen(StartupScreen())
