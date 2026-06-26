@@ -514,6 +514,7 @@ class GameScreen(Screen):
         "advance_plot": "正在推进剧情",
         "show_var": "正在显示变量",
         "unshow_var": "正在隐藏变量",
+        "spawn_agent": "正在派发子AI",
     }
 
     def compose(self) -> ComposeResult:

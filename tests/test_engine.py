@@ -19,7 +19,7 @@ def test_engine_creation():
         "advance_plot", "append_plan_node", "get_var",
         "mark_as_end_node", "pin_var", "set_root_plan_node",
         "set_setting", "set_var", "show_var",
-        "unpin_var", "unshow_var",
+        "spawn_agent", "unpin_var", "unshow_var",
     ]
 
 

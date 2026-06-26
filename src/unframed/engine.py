@@ -85,6 +85,22 @@ SYSTEM_PROMPT = """\
    - 不写"现在输出背景"，而是在第一条消息的第一段就是背景叙事
    - **你的第一条消息的第一句话必须是故事本身，不能是任何准备/计划性陈述**
 
+【子AI系统】
+你有一个特殊工具 **spawn_agent**，用于派发子AI执行独立任务。
+何时使用：
+- 需要生成一个NPC的详细背景故事，但不想中断主线叙事
+- 需要模拟一场战斗推演，计算伤亡和结果
+- 需要探索一个场景的细节（建筑结构、隐藏线索、可交互物品）
+- 需要规划一条支线任务的剧情节点
+- 任何可以独立于主线并行处理的任务
+
+工作方式：
+1. 调用 spawn_agent(name, task, context) 派发子AI
+2. 子AI会读取游戏变量了解当前局面
+3. 子AI执行任务后调用 report_back 汇报结果
+4. 你将子AI的汇报内容整合到叙事中
+5. **子AI不能与玩家交互**，玩家只通过你的叙事感知到子AI的工作成果
+
 【输出流程】
 每轮必须按以下顺序执行，不可跳过：
 1. **打腹稿**：在心中构思这一轮要推进的剧情方向、玩家面临的局面和可选行动。
@@ -257,6 +273,10 @@ class GameEngine:
         temperature: float = 0.7,
         max_history_rounds: int = 500,
     ) -> None:
+        self._api_key = api_key
+        self._base_url = base_url
+        self._model = model
+        self._temperature = temperature
         self.vars_db: Dict[str, VarEntry] = {}
         self.round_num: int = 0
         self.end_requested: Optional[str] = None
@@ -354,6 +374,20 @@ class GameEngine:
         def unshow_var(name: str) -> str:
             """将指定变量从右侧面板移除。"""
             return self._unshow_var(name)
+
+        @self.tools.add
+        def spawn_agent(name: str, task: str, context: str = "") -> str:
+            """派发一个子AI去执行独立任务（如规划支线、生成NPC对话、模拟战斗推演、探索场景等）。
+            子AI无法与玩家交互，完成后会向主AI汇报结果。
+            
+            Args:
+                name: 子AI的角色名称（如"侦察兵"、"军师"、"NPC对话生成器"）
+                task: 要子AI完成的具体任务描述
+                context: 额外的上下文信息，帮助子AI理解当前局面
+            Returns:
+                子AI的汇报内容
+            """
+            return self._run_sub_agent(name, task, context)
 
     # ==================================================================
     # Tool Implementations
@@ -587,8 +621,69 @@ class GameEngine:
         return f"变量 '{name}' 已从玩家可见列表中移除。"
 
     # ==================================================================
-    # LRU Helpers
+    # Sub-Agent System
     # ==================================================================
+
+    def _run_sub_agent(self, name: str, task: str, context: str = "") -> str:
+        """Spawn a sub-AI to execute an independent game task.
+
+        The sub-agent has read-only access to game variables and can
+        report back to the main AI. It cannot interact with the player.
+        """
+        from ai_util import AIBot as SubAIBot, Agent as SubAgent, Tools as SubTools
+
+        # Build the sub-agent's system prompt
+        if context:
+            ctx_block = f"\n\n当前游戏上下文：{context}"
+        else:
+            ctx_block = ""
+
+        sub_prompt = (
+            f"你是一个游戏内的【{name}】。你的任务是：{task}\n\n"
+            f"规则：\n"
+            f"- 你只能使用提供的工具。\n"
+            f"- 你的最终输出（推理 + 结果）会返回给游戏主AI。\n"
+            f"- 完成后调用 report_back 汇报结果。\n"
+            f"- 不要与玩家直接互动。{ctx_block}"
+        )
+
+        # Create sub-agent with limited tools
+        sub_bot = SubAIBot(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            model=self._model,
+            temperature=self._temperature,
+            system_prompt=sub_prompt,
+            max_tool_rounds=5,
+        )
+        sub_tools = SubTools()
+        sub_tools.add(self._sub_get_var, name="get_var")
+        sub_tools.add(self._sub_report_back, name="report_back")
+        sub_agent = SubAgent(bot=sub_bot, tools=sub_tools)
+
+        # Run the sub-agent
+        report = ""
+        try:
+            for event in sub_agent.stream_msg(f"请执行任务：{task}"):
+                if event["type"] == "content":
+                    report += event["data"]
+                elif event["type"] == "error":
+                    report += f"\n[子AI错误: {event['data']}]"
+        except Exception as e:
+            report = f"[子AI运行异常: {e}]"
+
+        return f"[{name}的汇报]\n{report}"
+
+    def _sub_get_var(self, name: str) -> str:
+        """Read-only access to a game variable (for sub-agents)."""
+        entry = self.vars_db.get(name)
+        if entry is None:
+            return f"错误：变量 '{name}' 不存在。"
+        return f"{name} = {entry.value}"
+
+    def _sub_report_back(self, message: str) -> str:
+        """Report results back to the main AI. Call this when done."""
+        return f"汇报完成。\n{message}"
 
     def _is_in_catalog(self, name: str) -> bool:
         """Check whether a variable is currently in the catalog zone.
