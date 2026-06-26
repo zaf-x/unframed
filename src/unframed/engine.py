@@ -664,7 +664,11 @@ class GameEngine:
 
         agent_id = _uuid.uuid4().hex[:8]
 
-        ctx_block = f"\n\n当前世界局势：{context}" if context else ""
+        ctx_block = ""
+        if self.setting:
+            ctx_block += f"\n\n### 世界设定\n{self.setting[:800]}"
+        if context:
+            ctx_block += f"\n\n### 当前局势\n{context}"
 
         sub_prompt = (
             f"你是一个游戏角色：【{name}】\n\n"
@@ -710,11 +714,24 @@ class GameEngine:
         if entry.get("terminated"):
             return f"错误：子AI '{agent_id}' 已被终止。"
 
+        # Inject current game context into the message
+        ctx_parts = []
+        if self.setting:
+            summary = self.setting[:500]
+            if len(self.setting) > 500:
+                summary += "…"
+            ctx_parts.append(f"【当前世界设定】\n{summary}")
+        if self.plot_current:
+            ctx_parts.append(f"【当前剧情节点】\n{self.plot_current.name}")
+
+        context_block = "\n\n".join(ctx_parts)
+        enriched = f"{context_block}\n\n【主AI的消息】\n{message}" if context_block else message
+
         sub_agent = entry["agent"]
         reply = ""
 
         try:
-            for event in sub_agent.stream_msg(message):
+            for event in sub_agent.stream_msg(enriched):
                 if event["type"] == "content":
                     reply += event["data"]
                 elif event["type"] == "error":
