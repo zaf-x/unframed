@@ -35,7 +35,6 @@ from ..settings import (
     save_settings,
 )
 
-AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
 SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "seeds"))
 
@@ -459,6 +458,7 @@ class GameScreen(Screen):
     BINDINGS = [
         ("ctrl+s", "save_menu", "存档"),
         ("ctrl+l", "load_menu", "读档"),
+        ("ctrl+d", "delete_menu", "删档"),
         ("escape", "back_to_menu", "返回菜单"),
     ]
 
@@ -888,6 +888,7 @@ class SaveManagerScreen(Screen):
             gs = self.app.game_state
             gs.active_save_uuid = save_info["uuid"]
             gs.active_save_name = save_info.get("name")
+            _write_last_played(save_info["uuid"])
         except OSError as e:
             self.app.notify(f"保存失败: {e}", severity="error")
 

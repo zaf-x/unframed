@@ -54,27 +54,37 @@ def load_settings(path: Path | str | None = None) -> Dict[str, Any]:
 
 
 def save_settings(settings: Dict[str, Any], path: Path | str | None = None) -> None:
-    """Save settings to disk with restricted permissions."""
+    """Save settings to disk with restricted permissions.
+
+    Errors are caught and printed to stderr so the app can continue.
+    """
     path = Path(path) if path else CONFIG_PATH
 
-    # Normalize empty strings to None/null for optional fields.
-    normalized: Dict[str, Any] = {}
-    defaults = default_settings()
-    for key in defaults:
-        value = settings.get(key, defaults[key])
-        if isinstance(value, str) and value.strip() == "":
-            value = None
-        normalized[key] = value
+    try:
+        # Normalize empty strings to None/null for optional fields.
+        normalized: Dict[str, Any] = {}
+        defaults = default_settings()
+        for key in defaults:
+            value = settings.get(key, defaults[key])
+            if isinstance(value, str) and value.strip() == "":
+                value = None
+            normalized[key] = value
 
-    # Ensure parent directory exists.
-    path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure parent directory exists.
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write to a temp file and rename for atomicity.
-    temp_path = path.with_suffix(".tmp")
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(normalized, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+        # Write to a temp file and rename for atomicity.
+        temp_path = path.with_suffix(".tmp")
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+            f.write("\n")
 
-    # Restrict permissions before replacing the real file.
-    os.chmod(temp_path, 0o600)
-    temp_path.replace(path)
+        # Restrict permissions before replacing the real file.
+        try:
+            os.chmod(temp_path, 0o600)
+        except OSError:
+            pass  # best-effort on filesystems that don't support chmod
+
+        temp_path.replace(path)
+    except (OSError, json.JSONEncodeError) as e:
+        print(f"[警告] 无法保存配置文件: {e}", file=sys.stderr)

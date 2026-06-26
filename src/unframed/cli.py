@@ -227,34 +227,16 @@ def _save_menu(engine: GameEngine) -> None:
         if existing:
             if not _confirm(f"《{pick}》已存在，覆盖？"):
                 return
-            _save_game(engine, existing["file"])
-            _update_save_meta(existing["file"], uuid_str=existing["uuid"], name=pick)
+            _save_game(engine, existing["file"], uuid_str=existing["uuid"], name=pick)
             _write_last_played(existing["uuid"])
             return
         # New save
         uuid_str = _new_save_id()
         path = _save_path(uuid_str)
-        _save_game(engine, path)
-        _update_save_meta(path, uuid_str=uuid_str, name=pick)
+        _save_game(engine, path, uuid_str=uuid_str, name=pick)
         _write_last_played(uuid_str)
         console.print(f"[dim]✓ 已创建新存档《{pick}》[/]")
         return
-
-
-def _update_save_meta(path: str, uuid_str: str, name: str) -> None:
-    """Update uuid and name fields in an existing save file."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            state = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return
-    state["uuid"] = uuid_str
-    state["name"] = name
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-    except OSError:
-        pass
 
 
 def _load_menu(engine: GameEngine) -> bool:
@@ -586,27 +568,6 @@ def _startup_greeting() -> Optional[str]:
     if action == "help":
         _show_help()
     return action
-    if action == "new":
-        console.print()
-        name = input("\033[1;32m存档名称：\033[0m ").strip()
-        if not name:
-            console.print("[dim]取消[/]")
-            return None
-        uuid_str = _new_save_id()
-        _engine_save_uuid = uuid_str
-        _engine_save_name = name
-        seed_path = _pick_seed()
-        if seed_path:
-            engine._save_uuid = uuid_str
-            engine._save_name = name
-            with open(seed_path, "r", encoding="utf-8") as f:
-                seed_content = f.read()
-            _save_game(engine, _save_path(uuid_str))
-            _update_save_meta(_save_path(uuid_str), uuid_str=uuid_str, name=name)
-            _write_last_played(uuid_str)
-            return "new"
-        return None
-    return action
 
 
 def _pick_seed() -> Optional[str]:
@@ -693,13 +654,18 @@ def _handle_stream(engine: GameEngine, player_input: str, debug: bool = False) -
 # ======================================================================
 
 
-def _save_game(engine: GameEngine, path: str, quiet: bool = False) -> None:
+def _save_game(engine: GameEngine, path: str, quiet: bool = False,
+               uuid_str: str = "", name: str = "") -> None:
     """Save the current game state to a JSON file."""
     try:
         state = engine.export_state()
         state["conversation"] = engine.export_conversation()
         state["save_time"] = datetime.datetime.now().isoformat()
         state["model"] = engine.bot.model
+        if uuid_str:
+            state["uuid"] = uuid_str
+        if name:
+            state["name"] = name
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         if not quiet:
@@ -899,13 +865,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                         matched = s
                         break
                 if matched:
-                    _save_game(engine, matched["file"])
+                    _save_game(engine, matched["file"], uuid_str=matched["uuid"])
                     _write_last_played(matched["uuid"])
                 else:
                     uuid_str = _new_save_id()
                     path = _save_path(uuid_str)
-                    _save_game(engine, path)
-                    _update_save_meta(path, uuid_str=uuid_str, name=arg)
+                    _save_game(engine, path, uuid_str=uuid_str, name=arg)
                     _write_last_played(uuid_str)
             continue
 
