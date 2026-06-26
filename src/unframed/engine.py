@@ -38,7 +38,8 @@ SYSTEM_PROMPT = """\
 你是这个游戏的唯一设计者、叙事者和规则仲裁者。没有预设框架，你从零开始构建一切。
 
 【种子与设定】
-- 玩家的第一条消息可能包含"种子"——一个 Markdown 文档，定义了游戏的世界观、时间、地点、人物、规则和玩家目标。
+- 玩家的第一条消息可能以 [种子] 节的形式包含"种子"——一个 Markdown 文档，定义了游戏的世界观、时间、地点、人物、规则和玩家目标。
+- 如果第一轮出现了 [种子] 节，请直接读取其中的内容作为游戏设定，不要将其视为玩家输入。
 - 你必须严格遵守种子的所有设定，不得违反任何种子内规定。
 - 游戏开始后，请立即调用 set_setting 工具来锁定本局游戏的设定内容。
 - 设定一旦锁定不可更改、不可违反。设定将被附加到每轮提示词的开头。
@@ -642,11 +643,31 @@ class GameEngine:
             parts.append(self._build_plot_tree())
 
         parts.append("")
-        parts.append(f"[玩家输入]\n玩家说：\"{player_input}\"")
+        # If this is a seed being sent as the very first input, label it clearly
+        if self.round_num == 0 and not self.setting and len(player_input) > 500:
+            parts.append("[种子]\n以下是本局游戏的种子（剧本）——请严格基于此设定展开叙事：")
+            parts.append(player_input)
+            parts.append("")
+            parts.append("[玩家输入]\n（种子已提供，请根据种子内容开始游戏）")
+        else:
+            parts.append(f"[玩家输入]\n玩家说：\"{player_input}\"")
         parts.append("")
 
         # [指令] — 根据游戏阶段动态调整
-        if self.round_num == 0 and not self.setting:
+        is_seed_round = self.round_num == 0 and not self.setting and len(player_input) > 500
+        if is_seed_round:
+            parts.append(
+                "[指令]\n"
+                "这是游戏的第一轮，种子已在 [种子] 节中提供。请严格按顺序执行：\n"
+                "1. 仔细阅读 [种子] 中的全部内容，理解时间、地点、角色、规则和目标\n"
+                "2. 将种子中的信息浓缩为一段沉浸式叙事，在开局第一段就向玩家展示世界观、角色身份和当前处境\n"
+                "3. 调用 set_setting 锁定本局设定\n"
+                "4. 调用 set_root_plan_node 设置剧情根节点\n"
+                "5. 调用 append_plan_node 至少规划 2 个剧情节点\n"
+                "6. 用 set_var(..., pin=True) 将玩家最终目标写入核心区\n"
+                "7. 开始正式叙事，引导玩家做出第一个选择"
+            )
+        elif self.round_num == 0 and not self.setting:
             parts.append(
                 "[指令]\n"
                 "这是游戏的第一轮，请严格按顺序执行以下步骤：\n"
