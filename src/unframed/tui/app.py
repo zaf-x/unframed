@@ -218,6 +218,7 @@ class StartupScreen(Screen):
         if _read_last_played():
             items.append(ListItem(Label("[bold]继续上一个存档[/]")))
         items.append(ListItem(Label("加载存档")))
+        items.append(ListItem(Label("存档管理")))
         items.append(ListItem(Label("设置")))
         items.append(ListItem(Label("文档")))
         items.append(ListItem(Label("退出")))
@@ -228,11 +229,8 @@ class StartupScreen(Screen):
         if idx == 0:
             self.app.push_screen(NewSaveScreen())
         else:
-            # Shift index if "继续上一个存档" is present
             has_continue = bool(_read_last_played())
-            offset = 1 if has_continue else 0
             if has_continue and idx == 1:
-                # Continue last save
                 gs: _GameState = self.app.game_state
                 uuid_str = _read_last_played()
                 if uuid_str:
@@ -259,22 +257,23 @@ class StartupScreen(Screen):
                         except (json.JSONDecodeError, OSError) as e:
                             self.app.notify(f"读档失败: {e}", severity="error")
                             return
-            # Map remaining indices
-            def _map(idx: int) -> int:
-                if not has_continue:
-                    return idx
-                # 0=new, 1=continue, 2=load, 3=settings, 4=docs, 5=quit
-                # We already handled idx=0 and idx=1 above
-                # For remaining, subtract 1 to skip "continue"
-                return idx - 1
-            remap = _map(idx)
-            if remap == 1:  # load (index without continue)
+            # Build action map: skip "continue" when building absolute index
+            if has_continue:
+                # 0=new, 1=continue, 2=load, 3=save-mgr, 4=settings, 5=docs, 6=quit
+                actions = {2: "load", 3: "save-mgr", 4: "settings", 5: "docs", 6: "quit"}
+            else:
+                # 0=new, 1=load, 2=save-mgr, 3=settings, 4=docs, 5=quit
+                actions = {1: "load", 2: "save-mgr", 3: "settings", 4: "docs", 5: "quit"}
+            action = actions.get(idx)
+            if action == "load":
                 self.app.push_screen(LoadScreen())
-            elif remap == 2:  # settings
+            elif action == "save-mgr":
+                self.app.push_screen(SaveManagerScreen())
+            elif action == "settings":
                 self.app.push_screen(SettingsScreen())
-            elif remap == 3:  # docs
+            elif action == "docs":
                 self.app.push_screen(HelpScreen())
-            elif remap == 4:  # quit
+            elif action == "quit":
                 self.app.exit()
 
 
@@ -460,6 +459,7 @@ class GameScreen(Screen):
     BINDINGS = [
         ("ctrl+s", "save_menu", "存档"),
         ("ctrl+l", "load_menu", "读档"),
+        ("escape", "back_to_menu", "返回菜单"),
     ]
 
     CSS = """
@@ -622,6 +622,17 @@ class GameScreen(Screen):
     def action_delete_menu(self) -> None:
         self._show_slot_picker("delete")
 
+    def action_back_to_menu(self) -> None:
+        """Auto-save and return to the startup menu."""
+        if self._running:
+            self.app.notify("请等待当前回合完成", severity="warning")
+            return
+        # Disable input to prevent race
+        inp = self.query_one("#player-input", Input)
+        inp.disabled = True
+        self._auto_save()
+        self.app.pop_screen()
+
     def _show_slot_picker(self, mode: str) -> None:
         """Show a slot picker for save/load/delete."""
         self.app.push_screen(SlotPickerScreen(mode, self._engine))
@@ -760,7 +771,7 @@ class SaveManagerScreen(Screen):
     }
     """
 
-    def __init__(self, engine: GameEngine) -> None:
+    def __init__(self, engine: GameEngine | None = None) -> None:
         super().__init__()
         self._engine = engine
         self._selectable: list[dict] = []
@@ -787,23 +798,51 @@ class SaveManagerScreen(Screen):
         lv_items.insert(0, ListItem(Label("[bold]新建存档...[/]")))
         lv_items.append(ListItem(Label("[dim]取消[/]")))
         yield ListView(*lv_items, id="slot-list")
-        yield Static("[dim]Enter 保存  |  Delete 删除  |  R 重命名  |  q 关闭[/]", classes="hint")
+        if self._engine:
+            yield Static("[dim]Enter 覆盖保存  |  Delete 删除  |  R 重命名  |  q 关闭[/]", classes="hint")
+        else:
+            yield Static("[dim]Enter 加载  |  Delete 删除  |  R 重命名  |  q 关闭[/]", classes="hint")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
         # idx 0 is "新建存档", skip it by using idx-1 into _selectable
         if idx == 0:
-            # New save
             self.app.push_screen(NewSaveScreen())
             return
         save_idx = idx - 1
         if save_idx < len(self._selectable):
             s = self._selectable[save_idx]
             if s.get("corrupted"):
-                self.app.notify("该存档已损坏，无法保存", severity="error")
+                self.app.notify("该存档已损坏", severity="error")
                 return
-            self._save_to(s)
-        self.app.pop_screen()
+            if self._engine:
+                self._save_to(s)
+            else:
+                # From startup menu: load the save
+                gs = self.app.game_state
+                gs.engine = GameEngine(
+                    api_key=gs.api_key,
+                    base_url=gs.base_url,
+                    model=gs.model,
+                    temperature=gs.temperature,
+                )
+                try:
+                    with open(s["file"], encoding="utf-8") as f:
+                        state = json.load(f)
+                    gs.engine.import_state(state)
+                    conv = state.get("conversation", [])
+                    if conv:
+                        gs.engine.import_conversation(conv)
+                    gs.initialized = True
+                    gs.active_save_uuid = state.get("uuid", s["uuid"])
+                    gs.active_save_name = state.get("name", s["name"])
+                    self.app.pop_screen()
+                    self.app.push_screen(GameScreen())
+                except (json.JSONDecodeError, OSError) as e:
+                    self.app.notify(f"读档失败: {e}", severity="error")
+                    return
+        if self._engine:
+            self.app.pop_screen()
 
     def action_delete_slot(self) -> None:
         lv = self.query_one("#slot-list", ListView)
