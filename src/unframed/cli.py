@@ -23,10 +23,8 @@ import itertools
 import json
 import os
 import sys
-import termios
 import threading
 import time
-import tty
 from typing import Any, Dict, List, Optional
 
 # ---- Colorama: 跨平台 ANSI 支持 ----
@@ -457,23 +455,36 @@ def print_banner() -> None:
 
 def _read_key() -> str:
     """Read a single keypress. Returns 'up'/'down'/'enter'/'q' or the char."""
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            seq = sys.stdin.read(2)
-            if seq == "[A":
-                return "up"
-            if seq == "[B":
-                return "down"
-            return "escape"
-        if ch == "\r" or ch == "\n":
+    if os.name == "nt":
+        import msvcrt
+        ch = msvcrt.getch()
+        if ch == b"\xe0":  # arrow key prefix on Windows
+            ch2 = msvcrt.getch()
+            mapping = {b"H": "up", b"P": "down", b"M": "right", b"K": "left"}
+            return mapping.get(ch2, "escape")
+        if ch in (b"\r", b"\n"):
             return "enter"
-        return ch.lower()
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        return ch.decode("utf-8", errors="replace").strip().lower() or "enter"
+    else:
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            if ch == "\x1b":
+                seq = sys.stdin.read(2)
+                if seq == "[A":
+                    return "up"
+                if seq == "[B":
+                    return "down"
+                return "escape"
+            if ch == "\r" or ch == "\n":
+                return "enter"
+            return ch.lower()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def _menu_selector(items: List[str]) -> Optional[int]:
