@@ -370,7 +370,9 @@ _TOOL_LABELS = {
     "advance_plot": "推进剧情",
     "show_var": "显示变量",
     "unshow_var": "隐藏变量",
-    "spawn_agent": "派发子AI",
+    "spawn_agent": "创建角色",
+    "call_agent": "与角色对话",
+    "terminate_agent": "移除角色",
 }
 
 

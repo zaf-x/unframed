@@ -85,21 +85,27 @@ SYSTEM_PROMPT = """\
    - 不写"现在输出背景"，而是在第一条消息的第一段就是背景叙事
    - **你的第一条消息的第一句话必须是故事本身，不能是任何准备/计划性陈述**
 
-【子AI系统】
-你有一个特殊工具 **spawn_agent**，用于派发子AI执行独立任务。
-何时使用：
-- 需要生成一个NPC的详细背景故事，但不想中断主线叙事
-- 需要模拟一场战斗推演，计算伤亡和结果
-- 需要探索一个场景的细节（建筑结构、隐藏线索、可交互物品）
-- 需要规划一条支线任务的剧情节点
-- 任何可以独立于主线并行处理的任务
+【子AI系统（NPC）】
+你可以创建和管理长期存在的子AI，作为游戏世界中的NPC、同伴或组织。
 
-工作方式：
-1. 调用 spawn_agent(name, task, context) 派发子AI
-2. 子AI会读取游戏变量了解当前局面
-3. 子AI执行任务后调用 report_back 汇报结果
-4. 你将子AI的汇报内容整合到叙事中
-5. **子AI不能与玩家交互**，玩家只通过你的叙事感知到子AI的工作成果
+**spawn_agent(name, personality, context)** — 创建一个持久子AI（NPC）。
+- name: 角色名和身份（如"酒馆老板·老陈"）
+- personality: 性格、行为模式、知识范围的详细描述
+- 返回一个 agent_id，后续用这个ID与TA对话
+- 子AI拥有独立记忆，会记住每一次对话
+
+**call_agent(agent_id, message)** — 与已有子AI对话。
+- agent_id: spawn_agent 返回的ID
+- message: 你对子AI说的话
+- 子AI会基于它的性格、记忆和当前世界状态回复
+
+**terminate_agent(agent_id)** — 终止子AI（NPC死亡/离开）。
+- 子AI的记忆会随之消失
+
+规则：
+- 子AI可以读取游戏变量了解世界状态，但不能直接修改它们
+- **子AI不能与玩家直接交互**——玩家只通过你的叙事感知到子AI的存在
+- 你可以用 call_agent 让子AI之间互动，并将结果整合到叙事中
 
 【输出流程】
 每轮必须按以下顺序执行，不可跳过：
@@ -296,6 +302,10 @@ class GameEngine:
         self.shown_vars: set = set()
         """通过 show_var 标记为玩家可见的变量名集合。"""
 
+        # ---- 持久子AI ----
+        self.sub_agents: Dict[str, Dict[str, Any]] = {}
+        """长期存在的子AI（NPC）。格式: {agent_id: {name, bot, ...}}"""
+
         # ---- Setup tools ----
         self.tools = Tools()
         self._register_tools()
@@ -376,18 +386,41 @@ class GameEngine:
             return self._unshow_var(name)
 
         @self.tools.add
-        def spawn_agent(name: str, task: str, context: str = "") -> str:
-            """派发一个子AI去执行独立任务（如规划支线、生成NPC对话、模拟战斗推演、探索场景等）。
-            子AI无法与玩家交互，完成后会向主AI汇报结果。
+        def spawn_agent(name: str, personality: str, context: str = "") -> str:
+            """创建一个长期存在的子AI（如NPC、军师、同伴）。子AI拥有独立记忆，
+            可以在后续回合中通过 call_agent 与之对话。子AI无法直接与玩家交互。
             
             Args:
-                name: 子AI的角色名称（如"侦察兵"、"军师"、"NPC对话生成器"）
-                task: 要子AI完成的具体任务描述
-                context: 额外的上下文信息，帮助子AI理解当前局面
+                name: 子AI的角色名称和身份描述（如"酒馆老板·老陈，消息灵通但贪财"）
+                personality: 子AI的性格、行为模式、知识范围的详细描述
+                context: 额外上下文，帮助子AI理解当前世界局势
             Returns:
-                子AI的汇报内容
+                子AI的ID和创建确认
             """
-            return self._run_sub_agent(name, task, context)
+            return self._spawn_agent(name, personality, context)
+
+        @self.tools.add
+        def call_agent(agent_id: str, message: str) -> str:
+            """与一个已创建的持久子AI对话。子AI会基于自己的记忆和性格回复。
+            
+            Args:
+                agent_id: spawn_agent 返回的ID
+                message: 你对子AI说的话或询问
+            Returns:
+                子AI的回复
+            """
+            return self._call_agent(agent_id, message)
+
+        @self.tools.add
+        def terminate_agent(agent_id: str) -> str:
+            """终止一个持久子AI，释放其资源，它将不再存在。
+            
+            Args:
+                agent_id: 要终止的子AI的ID
+            Returns:
+                操作结果
+            """
+            return self._terminate_agent(agent_id)
 
     # ==================================================================
     # Tool Implementations
@@ -621,58 +654,82 @@ class GameEngine:
         return f"变量 '{name}' 已从玩家可见列表中移除。"
 
     # ==================================================================
-    # Sub-Agent System
+    # Persistent Sub-Agent System (NPCs)
     # ==================================================================
 
-    def _run_sub_agent(self, name: str, task: str, context: str = "") -> str:
-        """Spawn a sub-AI to execute an independent game task.
-
-        The sub-agent has read-only access to game variables and can
-        report back to the main AI. It cannot interact with the player.
-        """
+    def _spawn_agent(self, name: str, personality: str, context: str = "") -> str:
+        """Create a persistent sub-agent (NPC) that maintains its own memory."""
+        import uuid as _uuid
         from ai_util import AIBot as SubAIBot, Agent as SubAgent, Tools as SubTools
 
-        # Build the sub-agent's system prompt
-        if context:
-            ctx_block = f"\n\n当前游戏上下文：{context}"
-        else:
-            ctx_block = ""
+        agent_id = _uuid.uuid4().hex[:8]
+
+        ctx_block = f"\n\n当前世界局势：{context}" if context else ""
 
         sub_prompt = (
-            f"你是一个游戏内的【{name}】。你的任务是：{task}\n\n"
+            f"你是一个游戏角色：【{name}】\n\n"
+            f"性格与设定：{personality}{ctx_block}\n\n"
             f"规则：\n"
-            f"- 你只能使用提供的工具。\n"
-            f"- 你的最终输出（推理 + 结果）会返回给游戏主AI。\n"
-            f"- 完成后调用 report_back 汇报结果。\n"
-            f"- 不要与玩家直接互动。{ctx_block}"
+            f"- 你只能使用提供的工具（get_var 读取世界状态）。\n"
+            f"- 你会记住每一轮和主AI的对话。\n"
+            f"- 保持角色一致性，根据你的性格和知识范围回复。\n"
+            f"- 不要与玩家直接互动——你只与游戏主AI交流。"
         )
 
-        # Create sub-agent with limited tools
         sub_bot = SubAIBot(
             api_key=self._api_key,
             base_url=self._base_url,
             model=self._model,
             temperature=self._temperature,
             system_prompt=sub_prompt,
-            max_tool_rounds=5,
+            max_tool_rounds=3,
         )
         sub_tools = SubTools()
         sub_tools.add(self._sub_get_var, name="get_var")
-        sub_tools.add(self._sub_report_back, name="report_back")
         sub_agent = SubAgent(bot=sub_bot, tools=sub_tools)
 
-        # Run the sub-agent
-        report = ""
-        try:
-            for event in sub_agent.stream_msg(f"请执行任务：{task}"):
-                if event["type"] == "content":
-                    report += event["data"]
-                elif event["type"] == "error":
-                    report += f"\n[子AI错误: {event['data']}]"
-        except Exception as e:
-            report = f"[子AI运行异常: {e}]"
+        self.sub_agents[agent_id] = {
+            "name": name,
+            "bot": sub_bot,
+            "agent": sub_agent,
+        }
 
-        return f"[{name}的汇报]\n{report}"
+        return (
+            f"子AI创建成功。\n"
+            f"ID: {agent_id}\n"
+            f"角色: {name}\n"
+            f"你可以在后续回合中通过 call_agent(agent_id=\"{agent_id}\", message=...) "
+            f"与TA对话。"
+        )
+
+    def _call_agent(self, agent_id: str, message: str) -> str:
+        """Talk to a persistent sub-agent. It remembers past conversations."""
+        entry = self.sub_agents.get(agent_id)
+        if entry is None:
+            return f"错误：找不到子AI '{agent_id}'。请检查ID是否正确。"
+        if entry.get("terminated"):
+            return f"错误：子AI '{agent_id}' 已被终止。"
+
+        sub_agent = entry["agent"]
+        reply = ""
+
+        try:
+            for event in sub_agent.stream_msg(message):
+                if event["type"] == "content":
+                    reply += event["data"]
+                elif event["type"] == "error":
+                    reply += f"\n[错误: {event['data']}]"
+        except Exception as e:
+            reply = f"[子AI响应异常: {e}]"
+
+        return f"[{entry['name']}]\n{reply}"
+
+    def _terminate_agent(self, agent_id: str) -> str:
+        """Terminate and remove a persistent sub-agent."""
+        entry = self.sub_agents.pop(agent_id, None)
+        if entry is None:
+            return f"错误：找不到子AI '{agent_id}'。"
+        return f"子AI '{entry['name']}' 已被终止。它的记忆也随之消散。"
 
     def _sub_get_var(self, name: str) -> str:
         """Read-only access to a game variable (for sub-agents)."""
@@ -680,10 +737,6 @@ class GameEngine:
         if entry is None:
             return f"错误：变量 '{name}' 不存在。"
         return f"{name} = {entry.value}"
-
-    def _sub_report_back(self, message: str) -> str:
-        """Report results back to the main AI. Call this when done."""
-        return f"汇报完成。\n{message}"
 
     def _is_in_catalog(self, name: str) -> bool:
         """Check whether a variable is currently in the catalog zone.
@@ -1003,6 +1056,15 @@ class GameEngine:
             result["plot_root"] = self.plot_root.to_dict()
         if self.plot_current:
             result["plot_current_id"] = self.plot_current.node_id
+        # Export persistent sub-agents
+        if self.sub_agents:
+            result["sub_agents"] = {
+                aid: {
+                    "name": entry["name"],
+                    "conversation": entry["bot"].messages,
+                }
+                for aid, entry in self.sub_agents.items()
+            }
         return result
 
     def import_state(self, state: Dict[str, Any]) -> None:
@@ -1034,6 +1096,31 @@ class GameEngine:
             self._bump_plan_id(self.plot_root)
         if state.get("plot_current_id") and self.plot_root:
             self.plot_current = self._find_node(state["plot_current_id"])
+
+        # Restore persistent sub-agents
+        self.sub_agents = {}
+        for aid, data in state.get("sub_agents", {}).items():
+            name = data.get("name", "未知角色")
+            conv = data.get("conversation", [])
+            sub_prompt = (
+                f"你是一个游戏角色：【{name}】\n\n"
+                f"规则：\n"
+                f"- 你只能使用提供的工具（get_var 读取世界状态）。\n"
+                f"- 保持角色一致性。\n"
+                f"- 不要与玩家直接互动。"
+            )
+            from ai_util import AIBot as SubAIBot, Agent as SubAgent, Tools as SubTools
+            sub_bot = SubAIBot(
+                api_key=self._api_key, base_url=self._base_url,
+                model=self._model, temperature=self._temperature,
+                system_prompt=sub_prompt, max_tool_rounds=3,
+            )
+            if conv:
+                sub_bot.messages = conv
+            sub_tools = SubTools()
+            sub_tools.add(self._sub_get_var, name="get_var")
+            sub_agent = SubAgent(bot=sub_bot, tools=sub_tools)
+            self.sub_agents[aid] = {"name": name, "bot": sub_bot, "agent": sub_agent}
 
     def _bump_plan_id(self, node: PlanNode) -> None:
         """Bump the global node ID counter past all IDs in the given subtree."""
