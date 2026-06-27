@@ -1,5 +1,10 @@
 # unframed
 
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)]()
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)]()
+[![GitHub](https://img.shields.io/badge/GitHub-zaf--x%2Funframed-181717?logo=github)](https://github.com/zaf-x/unframed)
+
 **AI 自举叙事游戏** — AI 从零开始构建世界观、规则、角色与剧情。
 
 ## 核心设计
