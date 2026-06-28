@@ -63,6 +63,8 @@ from .settings import DEFAULT_MODEL, DEFAULT_TEMPERATURE, load_settings
 AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
 SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "seeds"))
+if not os.path.isdir(SEEDS_DIR):
+    SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
 
 
 # ======================================================================
