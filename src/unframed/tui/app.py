@@ -113,23 +113,31 @@ def _list_saves() -> list[dict]:
 # ======================================================================
 
 
-def _find_seeds() -> List[dict]:
-    if not os.path.isdir(SEEDS_DIR):
-        return []
+def _find_seeds(extra_dirs: List[str] | None = None) -> List[dict]:
+    dirs = [SEEDS_DIR]
+    if extra_dirs:
+        dirs.extend(extra_dirs)
+    seen = set()
     seeds = []
-    for f in sorted(os.listdir(SEEDS_DIR)):
-        if f.endswith(".json"):
-            try:
-                with open(os.path.join(SEEDS_DIR, f), encoding="utf-8") as fh:
-                    meta = json.load(fh)
-                title = meta.get("title", f[:-5])
-                content_rel = meta.get("content", "")
-                content_path = os.path.join(SEEDS_DIR, content_rel) if content_rel else ""
-                if not content_path or not os.path.exists(content_path):
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if f.endswith(".json"):
+                try:
+                    with open(os.path.join(d, f), encoding="utf-8") as fh:
+                        meta = json.load(fh)
+                    title = meta.get("title", f[:-5])
+                    content_rel = meta.get("content", "")
+                    content_path = os.path.join(d, content_rel) if content_rel else ""
+                    if not content_path or not os.path.exists(content_path):
+                        continue
+                    if content_path in seen:
+                        continue
+                    seen.add(content_path)
+                    seeds.append({"title": title, "path": content_path})
+                except (json.JSONDecodeError, OSError):
                     continue
-                seeds.append({"title": title, "path": content_path})
-            except (json.JSONDecodeError, OSError):
-                continue
     return seeds
 
 
@@ -162,6 +170,12 @@ class _GameState:
             or settings.get("temperature")
             or DEFAULT_TEMPERATURE
         )
+        self.seed_dirs: list[str] = []
+        raw = settings.get("seed_dirs", "")
+        if isinstance(raw, list):
+            self.seed_dirs = [d for d in raw if d]
+        elif isinstance(raw, str) and raw.strip():
+            self.seed_dirs = [raw.strip()]
         self.engine: GameEngine | None = None
         self.seed_content: str = ""
         self.initialized: bool = False
@@ -284,7 +298,7 @@ class StartupScreen(Screen):
 
 
 class SettingsScreen(Screen):
-    """API key, model, and temperature settings."""
+    """API key, model, temperature, and seed directory settings."""
 
     def compose(self) -> ComposeResult:
         gs: _GameState = self.app.game_state
@@ -294,6 +308,7 @@ class SettingsScreen(Screen):
         yield Input(placeholder="Base URL", value=gs.base_url or "", id="base-url")
         yield Input(placeholder="Model", value=gs.model, id="model")
         yield Input(placeholder="Temperature", value=str(gs.temperature), id="temperature")
+        yield Input(placeholder="自定义种子目录", value=";".join(gs.seed_dirs), id="seed-dirs")
         yield Button("保存", id="save-settings")
         yield Button("返回", id="back")
 
@@ -308,12 +323,15 @@ class SettingsScreen(Screen):
                 gs.temperature = float(temp_str) if temp_str else DEFAULT_TEMPERATURE
             except ValueError:
                 gs.temperature = DEFAULT_TEMPERATURE
+            raw = self.query_one("#seed-dirs", Input).value.strip()
+            gs.seed_dirs = [d.strip() for d in raw.split(";") if d.strip()]
             save_settings(
                 {
                     "api_key": gs.api_key,
                     "base_url": gs.base_url,
                     "model": gs.model,
                     "temperature": gs.temperature,
+                    "seed_dirs": gs.seed_dirs,
                 }
             )
             self.app.notify("设置已保存")
@@ -361,7 +379,8 @@ class SeedPickerScreen(Screen):
     """Seed selection."""
 
     def compose(self) -> ComposeResult:
-        seeds = _find_seeds()
+        extra = self.app.game_state.seed_dirs if hasattr(self.app, 'game_state') else None
+        seeds = _find_seeds(extra)
         yield Static("\n")
         yield Label("选择种子：", classes="prompt")
         items = [ListItem(Label(f"[bold]《{s['title']}》[/]")) for s in seeds]
@@ -369,7 +388,8 @@ class SeedPickerScreen(Screen):
         yield ListView(*items, id="seed_list")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        seeds = _find_seeds()
+        extra = self.app.game_state.seed_dirs if hasattr(self.app, 'game_state') else None
+        seeds = _find_seeds(extra)
         idx = event.list_view.index
         if idx < len(seeds):
             try:

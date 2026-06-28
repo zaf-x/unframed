@@ -72,28 +72,36 @@ if not os.path.isdir(SEEDS_DIR):
 # ======================================================================
 
 
-def _find_seeds() -> List[dict]:
-    """Scans seeds directory for .json seed files."""
-    if not os.path.isdir(SEEDS_DIR):
-        return []
+def _find_seeds(extra_dirs: Optional[List[str]] = None) -> List[dict]:
+    """Scans seeds directories for .json seed files."""
+    dirs = [SEEDS_DIR]
+    if extra_dirs:
+        dirs.extend(extra_dirs)
+    seen = set()
     seeds = []
-    for f in sorted(os.listdir(SEEDS_DIR)):
-        if f.endswith(".json"):
-            json_path = os.path.join(SEEDS_DIR, f)
-            try:
-                with open(json_path, encoding="utf-8") as fh:
-                    meta = json.load(fh)
-                title = meta.get("title", f[:-5])
-                content_rel = meta.get("content", "")
-                content_path = os.path.join(SEEDS_DIR, content_rel) if content_rel else ""
-                if not content_path or not os.path.exists(content_path):
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if f.endswith(".json"):
+                json_path = os.path.join(d, f)
+                try:
+                    with open(json_path, encoding="utf-8") as fh:
+                        meta = json.load(fh)
+                    title = meta.get("title", f[:-5])
+                    content_rel = meta.get("content", "")
+                    content_path = os.path.join(d, content_rel) if content_rel else ""
+                    if not content_path or not os.path.exists(content_path):
+                        continue
+                    if content_path in seen:
+                        continue
+                    seen.add(content_path)
+                    seeds.append({
+                        "title": title,
+                        "path": content_path,
+                    })
+                except (json.JSONDecodeError, OSError):
                     continue
-                seeds.append({
-                    "title": title,
-                    "path": content_path,
-                })
-            except (json.JSONDecodeError, OSError):
-                continue
     return seeds
 
 
@@ -421,6 +429,12 @@ def _build_parser(defaults: Dict[str, Any]) -> argparse.ArgumentParser:
         help="种子文件路径（Markdown），定义游戏世界观、规则和目标",
     )
     parser.add_argument(
+        "--seed-dir",
+        action="append",
+        dest="seed_dirs",
+        help="额外的种子目录（可多次指定），其中的种子会自动出现在菜单中",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="显示工具调用等调试信息",
@@ -593,9 +607,9 @@ def _startup_greeting() -> Optional[str]:
     return action
 
 
-def _pick_seed() -> Optional[str]:
+def _pick_seed(extra_dirs: Optional[List[str]] = None) -> Optional[str]:
     """Show seed list with arrow keys. Returns content path or None."""
-    seeds = _find_seeds()
+    seeds = _find_seeds(extra_dirs)
     if not seeds:
         return None
     items = [f"《{s['title']}》" for s in seeds] + ["取消"]
@@ -837,7 +851,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 # Load cancelled — start new game without seed
                 pass
         elif action == "new":
-            seed_path = _pick_seed()
+            seed_path = _pick_seed(getattr(args, "seed_dirs", None) or None)
             if seed_path:
                 with open(seed_path, "r", encoding="utf-8") as f:
                     seed_content = f.read()
