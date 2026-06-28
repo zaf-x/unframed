@@ -26,14 +26,13 @@ classifiers = [
 ]
 dependencies = [
   "openai>=1.0.0",
-  "ai-util @ git+https://github.com/zaf-x/ai-util.git",
+  "zaf-ai-util>=0.4.0",
   "rich>=13.0.0",
   "colorama>=0.4.6",
   "textual>=0.41.0",
 ]
 
 [tool.hatch.metadata]
-allow-direct-references = true
 
 [project.scripts]
 unframed = "unframed.cli:main"
