@@ -62,9 +62,15 @@ from .settings import DEFAULT_MODEL, DEFAULT_TEMPERATURE, load_settings
 
 AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
-SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "seeds"))
+SEEDS_DIR = os.path.expanduser("~/.unframed/seeds")
+_BUILTIN_SEEDS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "seeds"))
 if not os.path.isdir(SEEDS_DIR):
-    SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
+    _fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
+    if os.path.isdir(_fallback):
+        SEEDS_DIR = _fallback
+    elif os.path.isdir(_BUILTIN_SEEDS):
+        import shutil
+        shutil.copytree(_BUILTIN_SEEDS, SEEDS_DIR, dirs_exist_ok=True)
 
 
 # ======================================================================

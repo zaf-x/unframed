@@ -36,9 +36,12 @@ from ..settings import (
 )
 
 SAVES_DIR = os.path.expanduser("~/.unframed_saves")
-SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "seeds"))
-if not os.path.isdir(SEEDS_DIR):
-    SEEDS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
+SEEDS_DIR = os.path.expanduser("~/.unframed/seeds")
+# On first run, copy built-in seeds to the user's seed directory
+_BUILTIN_SEEDS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
+if not os.path.isdir(SEEDS_DIR) and os.path.isdir(_BUILTIN_SEEDS):
+    import shutil
+    shutil.copytree(_BUILTIN_SEEDS, SEEDS_DIR, dirs_exist_ok=True)
 
 
 def _new_save_id() -> str:
