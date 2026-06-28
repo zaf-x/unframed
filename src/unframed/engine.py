@@ -15,6 +15,7 @@ Core principles:
 
 from __future__ import annotations
 
+import uuid as _uuid
 from typing import Any, Dict, Generator, List, Optional
 
 from ai_util import AIBot, Agent, Tools
@@ -278,11 +279,15 @@ class GameEngine:
         model: str = "gpt-4o",
         temperature: float = 0.7,
         max_history_rounds: int = 500,
+        max_tool_rounds: int = 10,
+        sub_agent_max_rounds: int = 3,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url
         self._model = model
         self._temperature = temperature
+        self._max_tool_rounds = max_tool_rounds
+        self._sub_agent_max_rounds = sub_agent_max_rounds
         self.vars_db: Dict[str, VarEntry] = {}
         self.round_num: int = 0
         self.end_requested: Optional[str] = None
@@ -317,7 +322,7 @@ class GameEngine:
             model=model,
             temperature=temperature,
             system_prompt=SYSTEM_PROMPT,
-            max_tool_rounds=10,
+            max_tool_rounds=self._max_tool_rounds,
         )
         self.agent = Agent(bot=self.bot, tools=self.tools)
 
@@ -659,7 +664,6 @@ class GameEngine:
 
     def _spawn_agent(self, name: str, personality: str, context: str = "") -> str:
         """Create a persistent sub-agent (NPC) that maintains its own memory."""
-        import uuid as _uuid
         from ai_util import AIBot as SubAIBot, Agent as SubAgent, Tools as SubTools
 
         agent_id = _uuid.uuid4().hex[:8]
@@ -686,7 +690,7 @@ class GameEngine:
             model=self._model,
             temperature=self._temperature,
             system_prompt=sub_prompt,
-            max_tool_rounds=3,
+            max_tool_rounds=self._sub_agent_max_rounds,
         )
         sub_tools = SubTools()
         sub_tools.add(self._sub_get_var, name="get_var")
@@ -711,8 +715,6 @@ class GameEngine:
         entry = self.sub_agents.get(agent_id)
         if entry is None:
             return f"错误：找不到子AI '{agent_id}'。请检查ID是否正确。"
-        if entry.get("terminated"):
-            return f"错误：子AI '{agent_id}' 已被终止。"
 
         # Inject current game context into the message
         ctx_parts = []
@@ -1130,7 +1132,7 @@ class GameEngine:
             sub_bot = SubAIBot(
                 api_key=self._api_key, base_url=self._base_url,
                 model=self._model, temperature=self._temperature,
-                system_prompt=sub_prompt, max_tool_rounds=3,
+                system_prompt=sub_prompt, max_tool_rounds=self._sub_agent_max_rounds,
             )
             if conv:
                 sub_bot.messages = conv

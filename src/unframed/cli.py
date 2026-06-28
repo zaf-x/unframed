@@ -53,7 +53,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from .engine import GameEngine
-from .settings import load_settings, save_settings, DEFAULT_MODEL, DEFAULT_TEMPERATURE
+from .settings import DEFAULT_MODEL, DEFAULT_TEMPERATURE, load_settings
 
 
 # ======================================================================
@@ -458,10 +458,11 @@ def print_banner() -> None:
 
 def _read_key() -> str:
     """Read a single keypress. Returns 'up'/'down'/'enter'/'q' or the char."""
+    import select
     if os.name == "nt":
         import msvcrt
         ch = msvcrt.getch()
-        if ch == b"\xe0":  # arrow key prefix on Windows
+        if ch == b"\xe0":
             ch2 = msvcrt.getch()
             mapping = {b"H": "up", b"P": "down", b"M": "right", b"K": "left"}
             return mapping.get(ch2, "escape")
@@ -471,20 +472,26 @@ def _read_key() -> str:
     else:
         import termios
         import tty
+        import sys
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
             ch = sys.stdin.read(1)
             if ch == "\x1b":
-                seq = sys.stdin.read(2)
-                if seq == "[A":
-                    return "up"
-                if seq == "[B":
-                    return "down"
+                # Use select with timeout to handle standalone Escape
+                if select.select([sys.stdin], [], [], 0.1) == ([sys.stdin], [], []):
+                    seq = sys.stdin.read(2)
+                    if seq == "[A":
+                        return "up"
+                    if seq == "[B":
+                        return "down"
+                    return "escape"
                 return "escape"
             if ch == "\r" or ch == "\n":
                 return "enter"
+            if ch == "\x03":  # Ctrl+C
+                raise KeyboardInterrupt
             return ch.lower()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
@@ -683,8 +690,8 @@ def _save_game(engine: GameEngine, path: str, quiet: bool = False,
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         if not quiet:
-            slot_name = os.path.basename(path).replace(".json", "")
-            console.print(f"[dim]✓ 已保存 ({slot_name})[/]")
+            display = name or os.path.basename(path).replace(".json", "")
+            console.print(f"[dim]✓ 已保存 ({display})[/]")
     except OSError as e:
         if not quiet:
             console.print(f"[bold red]✗ 无法写入: {e}[/]")

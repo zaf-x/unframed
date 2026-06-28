@@ -78,6 +78,8 @@ def save_settings(settings: Dict[str, Any], path: Path | str | None = None) -> N
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(normalized, f, ensure_ascii=False, indent=2)
             f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
 
         # Restrict permissions before replacing the real file.
         try:

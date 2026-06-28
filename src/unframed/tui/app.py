@@ -724,7 +724,7 @@ class GameScreen(Screen):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
             _write_last_played(uuid_str)
-        except OSError as e:
+        except (OSError, TypeError, ValueError) as e:
             self.app.notify(f"自动存档失败: {e}", severity="warning")
 
     def _show_loading(self, show: bool, status: str = "") -> None:
@@ -755,7 +755,11 @@ class SaveManagerScreen(Screen):
     BINDINGS = [
         ("delete", "delete_slot", "删除"),
         ("r", "rename_slot", "重命名"),
+        ("escape", "close", "关闭"),
     ]
+
+    def action_close(self) -> None:
+        self.app.pop_screen()
 
     CSS = """
     SaveManagerScreen {
@@ -808,7 +812,6 @@ class SaveManagerScreen(Screen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
-        # idx 0 is "新建存档", skip it by using idx-1 into _selectable
         if idx == 0:
             self.app.push_screen(NewSaveScreen())
             return
@@ -820,8 +823,8 @@ class SaveManagerScreen(Screen):
                 return
             if self._engine:
                 self._save_to(s)
+                self.app.pop_screen()
             else:
-                # From startup menu: load the save
                 gs = self.app.game_state
                 gs.engine = GameEngine(
                     api_key=gs.api_key,
@@ -843,8 +846,7 @@ class SaveManagerScreen(Screen):
                     self.app.push_screen(GameScreen())
                 except (json.JSONDecodeError, OSError) as e:
                     self.app.notify(f"读档失败: {e}", severity="error")
-                    return
-        if self._engine:
+        else:
             self.app.pop_screen()
 
     def action_delete_slot(self) -> None:
@@ -1041,6 +1043,10 @@ class SlotPickerScreen(Screen):
                     self.app.notify(f"已删除《{s.get('name', '未命名')}》")
                 except OSError as e:
                     self.app.notify(f"删除失败: {e}", severity="error")
+        else:
+            # "取消" selected — dismiss the screen
+            self.app.pop_screen()
+            return
 
         if self._mode != "load":
             self.app.pop_screen()
