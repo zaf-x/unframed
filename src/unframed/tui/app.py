@@ -35,13 +35,27 @@ from ..settings import (
     save_settings,
 )
 
-SAVES_DIR = os.path.expanduser("~/.unframed_saves")
-SEEDS_DIR = os.path.expanduser("~/.unframed/seeds")
+_UNFRAMED_DIR = os.path.expanduser("~/.unframed")
+SAVES_DIR = os.path.join(_UNFRAMED_DIR, "saves")
+SEEDS_DIR = os.path.join(_UNFRAMED_DIR, "seeds")
 # On first run, copy built-in seeds to the user's seed directory
 _BUILTIN_SEEDS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
 if not os.path.isdir(SEEDS_DIR) and os.path.isdir(_BUILTIN_SEEDS):
     import shutil
     shutil.copytree(_BUILTIN_SEEDS, SEEDS_DIR, dirs_exist_ok=True)
+
+# Migrate old paths
+_OLD_SAVES = os.path.expanduser("~/.unframed_saves")
+if os.path.isdir(_OLD_SAVES) and not os.path.isdir(SAVES_DIR):
+    import shutil
+    shutil.move(_OLD_SAVES, SAVES_DIR)
+_OLD_CONFIG = os.path.expanduser("~/.unframed_config.json")
+if os.path.isfile(_OLD_CONFIG):
+    new_config = os.path.join(_UNFRAMED_DIR, "config.json")
+    if not os.path.isfile(new_config):
+        import shutil
+        os.makedirs(_UNFRAMED_DIR, exist_ok=True)
+        shutil.move(_OLD_CONFIG, new_config)
 
 
 def _new_save_id() -> str:

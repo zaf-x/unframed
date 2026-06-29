@@ -1,6 +1,6 @@
 """Persistent user settings for unframed.
 
-Settings are stored in ``~/.unframed_config.json`` with 0o600 permissions
+Settings are stored in ``~/.unframed/config.json`` with 0o600 permissions
 because the file may contain a plaintext API key.
 """
 
@@ -15,7 +15,8 @@ from typing import Any, Dict
 DEFAULT_MODEL = "gpt-4o"
 DEFAULT_TEMPERATURE = 0.7
 
-CONFIG_PATH = Path.home() / ".unframed_config.json"
+UNFRAMED_DIR = Path.home() / ".unframed"
+CONFIG_PATH = UNFRAMED_DIR / "config.json"
 
 
 def default_settings() -> Dict[str, Any]:

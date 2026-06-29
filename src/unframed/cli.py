@@ -36,7 +36,7 @@ colorama.init()
 try:
     import readline  # noqa: F401
 
-    histfile = os.path.expanduser("~/.unframed_history")
+    histfile = os.path.join(os.path.expanduser("~/.unframed"), "history")
     try:
         readline.read_history_file(histfile)
     except (FileNotFoundError, OSError):
@@ -60,9 +60,43 @@ from .settings import DEFAULT_MODEL, DEFAULT_TEMPERATURE, load_settings
 # 常量
 # ======================================================================
 
-AUTOSAVE_PATH = os.path.expanduser("~/.unframed_autosave.json")
-SAVES_DIR = os.path.expanduser("~/.unframed_saves")
-SEEDS_DIR = os.path.expanduser("~/.unframed/seeds")
+_UNFRAMED_DIR = os.path.expanduser("~/.unframed")
+AUTOSAVE_PATH = os.path.join(_UNFRAMED_DIR, "autosave.json")
+SAVES_DIR = os.path.join(_UNFRAMED_DIR, "saves")
+SEEDS_DIR = os.path.join(_UNFRAMED_DIR, "seeds")
+_BUILTIN_SEEDS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "seeds"))
+if not os.path.isdir(SEEDS_DIR):
+    _fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
+    if os.path.isdir(_fallback):
+        SEEDS_DIR = _fallback
+    elif os.path.isdir(_BUILTIN_SEEDS):
+        import shutil
+        shutil.copytree(_BUILTIN_SEEDS, SEEDS_DIR, dirs_exist_ok=True)
+
+# Migrate old paths
+_OLD_SAVES = os.path.expanduser("~/.unframed_saves")
+if os.path.isdir(_OLD_SAVES) and not os.path.isdir(SAVES_DIR):
+    import shutil
+    shutil.move(_OLD_SAVES, SAVES_DIR)
+_OLD_AUTOSAVE = os.path.expanduser("~/.unframed_autosave.json")
+if os.path.isfile(_OLD_AUTOSAVE) and not os.path.isfile(AUTOSAVE_PATH):
+    import shutil
+    os.makedirs(_UNFRAMED_DIR, exist_ok=True)
+    shutil.move(_OLD_AUTOSAVE, AUTOSAVE_PATH)
+_OLD_CONFIG = os.path.expanduser("~/.unframed_config.json")
+if os.path.isfile(_OLD_CONFIG):
+    new_config = os.path.join(_UNFRAMED_DIR, "config.json")
+    if not os.path.isfile(new_config):
+        import shutil
+        os.makedirs(_UNFRAMED_DIR, exist_ok=True)
+        shutil.move(_OLD_CONFIG, new_config)
+# Migrate old history file
+_OLD_HIST = os.path.expanduser("~/.unframed_history")
+_new_hist = os.path.join(_UNFRAMED_DIR, "history")
+if os.path.isfile(_OLD_HIST) and not os.path.isfile(_new_hist):
+    import shutil
+    os.makedirs(_UNFRAMED_DIR, exist_ok=True)
+    shutil.move(_OLD_HIST, _new_hist)
 _BUILTIN_SEEDS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "seeds"))
 if not os.path.isdir(SEEDS_DIR):
     _fallback = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "seeds"))
