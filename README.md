@@ -2,7 +2,8 @@
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)]()
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)]()
+[![PyPI](https://img.shields.io/badge/pypi-v0.3.0-blue?logo=pypi)](https://pypi.org/project/unframed/)
 [![GitHub](https://img.shields.io/badge/GitHub-zaf--x%2Funframed-181717?logo=github)](https://github.com/zaf-x/unframed)
 
 **AI 自举叙事游戏** — AI 从零开始构建世界观、规则、角色与剧情。
@@ -19,6 +20,12 @@
 ## 安装
 
 Python 3.8+ 环境：
+
+```bash
+pip install unframed
+```
+
+或
 
 ```bash
 pip install git+https://github.com/zaf-x/unframed.git
@@ -51,7 +58,7 @@ unframed --base-url https://api.example.com/v1
 unframed --temperature 0.9
 
 # 加载种子（剧本），自动使用 CLI 模式
-unframed --seed seeds/cyberpunk.md
+unframed --seed ~/.unframed/seeds/cyberpunk.md
 
 # 继续上次游戏，自动使用 CLI 模式
 unframed --continue
@@ -66,8 +73,8 @@ unframed --help
 
 ```
 unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
-         [--temperature TEMP] [--seed SEED] [--continue] [--cli]
-         [--debug] [--help]
+         [--temperature TEMP] [--seed SEED] [--seed-dir DIR]
+         [--continue] [--cli] [--debug] [--help]
 ```
 
 | 选项 | 说明 |
@@ -77,12 +84,13 @@ unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
 | `--model NAME` | 模型名，默认 `gpt-4o`（优先级：参数 > `OPENAI_MODEL` > 配置） |
 | `--temperature NUM` | 采样温度 0-2，默认 `0.7`（优先级：参数 > `OPENAI_TEMPERATURE` > 配置） |
 | `--seed PATH` | 种子文件路径（Markdown），跳过菜单直接加载（自动 CLI） |
+| `--seed-dir DIR` | 额外种子目录（可多次指定），其中的种子自动出现在菜单中 |
 | `--continue` | 继续上次游戏（自动 CLI） |
 | `--cli` | 使用 CLI 模式（默认 TUI） |
 | `--debug` | 显示工具调用详情（自动 CLI） |
 | `--help` | 显示玩家手册 |
 
-设置保存在 `~/.unframed_config.json`（权限 0o600），TUI 中主菜单→"设置"即可修改。
+设置保存在 `~/.unframed/config.json`（权限 0o600），TUI 中主菜单→"设置"即可修改。
 
 ### 环境变量
 
@@ -180,7 +188,8 @@ unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
 - **孤星：坠落日** — 2247 年，殖民船坠毁后的外星求生
 - **霓虹裁决** — 2140 年，同步轨道升降梯内
 - **循环日** — 无法逃脱的时间循环
-- **sudo apt 求生记** — 当 Linux 系统故障出现在神秘世界
+- **午夜频率** — 深夜广播信号背后的秘密
+- **sudo apt 求生记** — 身为 APT 包管理器，面对一次危险的依赖冲突
 - **地下王座** — 地下王国的权力与阴谋
 
 你也可以自己编写种子——参考 `docs/SEED_SPEC.md`。
@@ -199,7 +208,7 @@ unframed 支持 AI 在游戏中创建和管理长期存在的子 AI 角色，作
 
 ## 存档
 
-存档文件存储在 `~/.unframed_saves/` 目录，每局一个 UUID 文件（`{uuid}.json`）。
+存档文件存储在 `~/.unframed/saves/` 目录，每局一个 UUID 文件（`{uuid}.json`）。
 
 - **自动保存**：每轮自动保存到当前存档
 - **继续存档**：主菜单"继续上一个存档"可直接回到上次的游戏
@@ -229,7 +238,7 @@ src/unframed/
 ├── __init__.py    — 公共 API
 ├── engine.py      — 核心引擎：状态管理、工具定义、Prompt 组装、游戏循环
 ├── cli.py         — 交互式 CLI 入口（启动菜单、命令行命令）
-├── settings.py    — 持久化配置（~/.unframed_config.json）
+├── settings.py    — 持久化配置（~/.unframed/config.json）
 ├── render.py      — BBCode → ANSI 渲染器
 └── tui/
     ├── __init__.py — TUI 模块声明
@@ -237,6 +246,19 @@ src/unframed/
 ```
 
 基于 [ai-util](https://github.com/zaf-x/ai-util) 框架。
+
+## 数据目录
+
+首次运行后会在用户目录下创建：
+
+```
+~/.unframed/
+├── config.json       # 持久化配置（权限 0o600）
+├── saves/            # 存档文件（UUID 命名）
+├── seeds/            # 种子文件（首次运行自动复制内置种子）
+├── autosave.json     # CLI 模式自动存档
+└── history           # CLI 命令历史
+```
 
 ## License
 
