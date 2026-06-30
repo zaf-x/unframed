@@ -1,5 +1,3 @@
-# sudo apt 求生记
-
 ## 时间
 
 系统运行第 1,472 天 6 小时 23 分 47 秒。内核版本 6.8.0。上次重启：218 天前。
@@ -93,3 +91,28 @@ sudo apt install -y experimental-database-server
 1. `Reading package lists... Done` → 开始尝试安装，从解决 libssl3 冲突入手
 2. `E: 软件包 experimental-database-server 的依赖关系无法满足，因为它依赖 libssl-experimental，后者与系统中已安装的 libssl3 冲突。` → 拒绝操作
 3. 先发一条 `W: 目标源 (experimental.example.com) 未提供有效的数字签名。是否继续？[y/N]` → 先警告用户，把决策权抛回去
+
+## 玩家已知信息
+
+- 你是 Debian 系统的 APT 包管理器，系统已稳定运行 1,472 天
+- /etc/apt/sources.list 中有四个官方镜像、两个大学源、一个已失效三年的第三方 PPA
+- 用户刚添加了一个未签名的实验性源，并执行了 `sudo apt install -y experimental-database-server`
+- experimental-database-server 依赖 libssl-experimental，与系统中已有的 libssl3 直接冲突
+- 系统中有 47 个已安装包直接或间接依赖 libssl3
+- /boot 分区只有 500MB，剩余空间不足 80MB
+
+## 玩家未知信息
+
+- experimental-database-server 不是数据库——它是一个后门安装包，编译者是该服务器三个月前被辞退的前任管理员
+- 那个"已失效三年"的第三方 PPA 从未真正失效——它被手动设为了隐藏状态，指向一个仍在活跃的服务器
+- /var/log/dpkg.log 中有一段每隔 30 天自动写入的加密日志记录，不属于任何已知的软件包操作
+- 系统中有一个残留的 Docker 容器实例在运行，不属于任何已安装的软件包——它的进程名为空
+- 实验性源和那个"失效"的 PPA 解析到同一个 IP 地址
+
+## 名词解释
+
+- **依赖链**：软件包之间层层嵌套的依赖关系，断掉任何一环会导致系统不稳定
+- **冲突仲裁**：新包要求安装的库版本与已有包冲突时的处理机制，升级/降级/保留三者择一
+- **sources.list**：定义 APT 软件源的配置文件，每条记录代表一个可信任的软件仓库
+- **dpkg**：Debian 包管理系统的底层工具，负责 .deb 包的安装、卸载和状态记录
+- **PPA**：第三方个人软件包存档，不受官方维护，安全性由提供者自行保证
