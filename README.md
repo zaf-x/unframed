@@ -3,8 +3,10 @@
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
 [![Version](https://img.shields.io/badge/version-0.3.0-blue)]()
-[![PyPI](https://img.shields.io/badge/pypi-v0.3.0-blue?logo=pypi)](https://pypi.org/project/unframed/)
+[![PyPI](https://img.shields.io/badge/pypi-v0.3.1-blue?logo=pypi)](https://pypi.org/project/unframed/)
 [![GitHub](https://img.shields.io/badge/GitHub-zaf--x%2Funframed-181717?logo=github)](https://github.com/zaf-x/unframed)
+
+![unframed TUI 界面](docs/images/unframed_demo.png)
 
 **AI 自举叙事游戏** — AI 从零开始构建世界观、规则、角色与剧情。
 
@@ -45,6 +47,9 @@ pip install .
 # 需要设置 OPENAI_API_KEY 环境变量，或在 TUI 设置页填写
 export OPENAI_API_KEY="sk-..."
 unframed              # 默认启动 TUI
+```
+
+> 💡 **没有 API Key？** 查看 [DeepSeek API Key 获取指南](docs/DEEPSEEK_API_GUIDE.md) —— 注册即送 500 万 tokens，免费额度约 ¥7.5，国内直连无需翻墙。
 
 unframed --cli        # CLI 模式
 
@@ -104,6 +109,10 @@ unframed [--api-key API_KEY] [--base-url BASE_URL] [--model MODEL]
 读取优先级：**CLI 参数 > 环境变量 > 配置文件 > 内置默认**
 
 ## TUI 模式
+
+### TUI 界面截图
+
+![unframed TUI 界面](docs/images/unframed_demo.png)
 
 ### TUI 界面布局
 
